@@ -1,0 +1,82 @@
+<div class="app-container">
+  <mat-toolbar color="primary" class="header">
+    <h1>WPI Business School Assistant</h1>
+    <span class="spacer"></span>
+    <button
+      mat-icon-button
+      *ngIf="transcriptData"
+      (click)="togglePdfUpload()"
+      [attr.aria-label]="showPdfUpload ? 'Hide PDF upload' : 'Show PDF upload'"
+    >
+      <mat-icon>{{ showPdfUpload ? 'expand_less' : 'expand_more' }}</mat-icon>
+    </button>
+  </mat-toolbar>
+
+  <div class="main-content">
+    <!-- PDF Upload Section -->
+    <div *ngIf="showPdfUpload" class="pdf-upload-section">
+      <app-pdf-upload (transcriptLoaded)="onTranscriptLoaded($event)"></app-pdf-upload>
+    </div>
+
+    <!-- Chat Section -->
+    <div class="chat-section">
+      <div class="messages-container" #scrollContainer>
+        <div class="welcome-message" *ngIf="messages.length === 0">
+          <h2>Welcome to WPI Business School Assistant</h2>
+          <p *ngIf="!transcriptData">
+            Upload your academic transcript to get started. I can help you with:
+          </p>
+          <p *ngIf="transcriptData">
+            Great! Now I have your academic information. I can help you with:
+          </p>
+          <ul>
+            <li>Information about WPI Business School programs</li>
+            <li>Course requirements and recommendations</li>
+            <li>Academic progress tracking and analysis</li>
+            <li>Elective and prerequisite guidance</li>
+            <li>Career path advice</li>
+          </ul>
+          <p class="hint">Try: "What are the requirements for the MS in Business Analytics?"</p>
+        </div>
+
+        <mat-card *ngFor="let message of messages" [ngClass]="{'user-message': message.isUser, 'bot-message': !message.isUser}" class="message-card">
+          <mat-card-content>
+            <div class="message-avatar" *ngIf="!message.isUser">
+              <mat-icon>smart_toy</mat-icon>
+            </div>
+            <div class="message-content-wrapper">
+              <div class="message-content">{{ message.text }}</div>
+              <div class="message-timestamp">{{ message.timestamp | date:'short' }}</div>
+            </div>
+          </mat-card-content>
+        </mat-card>
+      </div>
+
+      <div class="input-container">
+        <mat-form-field appearance="outline" class="message-input">
+          <mat-label>Ask about programs, courses, or your academic progress...</mat-label>
+          <input
+            matInput
+            [(ngModel)]="messageText"
+            placeholder="Type your message here..."
+            [disabled]="loading"
+            (keyup.enter)="sendMessage()"
+          />
+        </mat-form-field>
+        <button
+          mat-raised-button
+          color="primary"
+          (click)="sendMessage()"
+          [disabled]="loading || !messageText.trim()"
+          class="send-btn"
+        >
+          <mat-icon *ngIf="!loading">send</mat-icon>
+          <mat-spinner *ngIf="loading" diameter="20"></mat-spinner>
+          <span>{{ loading ? 'Sending...' : 'Send' }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <router-outlet></router-outlet>
+</div>

@@ -1,0 +1,22 @@
+{
+  "greetings": {
+    "patterns": ["hi", "hello", "hey", "good morning", "good afternoon"],
+    "responses": [
+      "Hello! I'm your WPI Business School academic advisor. How can I help you today?",
+      "Hi there! I'm here to assist with your academic questions. What would you like to know?"
+    ]
+  },
+  "farewells": {
+    "patterns": ["bye", "goodbye", "see you", "thanks", "thank you"],
+    "responses": [
+      "You're welcome! Feel free to ask if you have more questions.",
+      "Goodbye! Don't hesitate to reach out if you need help."
+    ]
+  },
+  "help": {
+    "patterns": ["help", "what can you do", "how can you help"],
+    "responses": [
+      "I can help you with:\n- Program requirements and course information\n- Academic progress and transcript analysis\n- Specialization recommendations\n- Capstone requirements\n- Credit calculations\n\nWhat would you like to know?"
+    ]
+  }
+}

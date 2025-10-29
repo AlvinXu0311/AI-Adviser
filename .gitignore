@@ -1,0 +1,155 @@
+# Build and compiled output
+dist/
+build/
+tmp/
+out-tsc/
+
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+karma.log
+test-results/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+database/data/*.db
+database/data/*.sqlite
+database/migrations/*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build artifacts
+*.bundle.js
+*.bundle.css
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Angular specific
+.angular/
+*.js.map
+*.d.ts.map
+
+# Python specific
+.pytest_cache/
+.pytest_cache
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Misc
+.cache/
+.parcel-cache/
+.eslintcache
+.node_repl_history
+*.tgz
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.yarn/plugins/@yarnpkg/plugin-workspace-tools
+
+# Documentation temp files
+*.md~
+*.md.backup
+
+# Test output files
+test_cot_implementation.py
+*_test_output.txt
+
+# PDF uploads (keep example only)
+backend/uploads/*.pdf
+!backend/uploads/example.pdf
+
+# Rule-based system data
+backend/app/rules/data/*.json
+!backend/app/rules/data/example.json
+
+# Database backups
+database/backups/*.sql
+database/backups/*.dump
+
+.claude/
+.venv/
+frontend/.vscode

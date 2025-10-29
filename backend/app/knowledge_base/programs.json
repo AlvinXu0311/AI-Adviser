@@ -1,0 +1,215 @@
+{
+  "programs": [
+    {
+      "id": "msit",
+      "name": "MS in Information Technology",
+      "degree_type": "Master's",
+      "total_credits": 33,
+      "duration_semester": "6-12 months",
+      "format": ["On-Campus", "Online"],
+      "delivery": ["Full-time", "Part-time"],
+
+      "overview": "WPI's MS in Information Technology is a 33-credit graduate degree grounded in a technology-focused university that prepares students for IT leadership roles.",
+
+      "prerequisites": {
+        "bachelor_degree": "Required from accredited university",
+        "programming_courses": "At least one prior college-level programming course",
+        "math_requirement": "Three semesters of college-level math OR two semesters of calculus (grade B or better)",
+        "gpa_minimum": 3.0,
+        "notes": "All prerequisites must be met before enrollment"
+      },
+
+      "core_courses": [
+        {
+          "code": "MIS581",
+          "name": "Policy and Strategy for IT and Analytics",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "description": "Covers policy and strategic planning in IT and analytics"
+        },
+        {
+          "code": "MIS584",
+          "name": "Business Intelligence",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "description": "Explores business intelligence systems and practices"
+        },
+        {
+          "code": "MIS502",
+          "name": "Data Management for Analytics",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "description": "Focuses on data management principles for analytics applications"
+        }
+      ],
+
+      "specializations": [
+        {
+          "id": "ai_business",
+          "name": "Artificial Intelligence in Business",
+          "courses": [
+            {
+              "code": "MIS587",
+              "name": "Business Applications in Machine Learning",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MIS520_or_MIS581",
+              "name": "Choose: MIS 520 or MIS 581",
+              "credits": 3,
+              "options": ["MIS520", "MIS581"]
+            },
+            {
+              "code": "elective_1",
+              "name": "Choose: MKT 562, MKT 568, or OIE 552",
+              "credits": 3,
+              "options": ["MKT562", "MKT568", "OIE552"]
+            }
+          ]
+        },
+        {
+          "id": "is_design",
+          "name": "Information Systems Design",
+          "courses": [
+            {
+              "code": "MIS571",
+              "name": "Database Applications Design and Development",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MIS582",
+              "name": "Information Security Management",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MIS585",
+              "name": "User Experience Design",
+              "credits": 3,
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "data_analytics",
+          "name": "Data Analytics",
+          "courses": [
+            {
+              "code": "MIS587",
+              "name": "Business Applications in Machine Learning",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MKT568",
+              "name": "Marketing Analytics",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "elective_2",
+              "name": "Choose: MKT 565 or MKT 562",
+              "credits": 3,
+              "options": ["MKT565", "MKT562"]
+            }
+          ]
+        },
+        {
+          "id": "digital_transformation",
+          "name": "Digital Transformation",
+          "courses": [
+            {
+              "code": "MIS500",
+              "name": "Innovation with Information Systems",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "ops_choice",
+              "name": "Choice among operations courses",
+              "credits": 3,
+              "options": ["Operations courses"]
+            },
+            {
+              "code": "pm_choice",
+              "name": "Choice among project management/leadership courses",
+              "credits": 3,
+              "options": ["Project Management", "Leadership courses"]
+            }
+          ]
+        },
+        {
+          "id": "ux_user_experience",
+          "name": "IT User Experience",
+          "courses": [
+            {
+              "code": "MIS583",
+              "name": "User Experience Applications",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MIS586",
+              "name": "User Experience Methods",
+              "credits": 3,
+              "required": true
+            },
+            {
+              "code": "MKT561",
+              "name": "Consumer Behavior and Analytics",
+              "credits": 3,
+              "required": true
+            }
+          ]
+        }
+      ],
+
+      "capstone": {
+        "required": true,
+        "credits": 6,
+        "total_courses": 2,
+        "description": "REQUIRED: You must complete 2 capstone courses for a total of 6 credits. Both courses are mandatory and cannot be waived.",
+        "courses": [
+          {
+            "code": "OBC505",
+            "name": "Teaming and Organizing for Innovation",
+            "credits": 3,
+            "required": true,
+            "order": 1
+          },
+          {
+            "code": "MIS573",
+            "name": "System Design and Development",
+            "credits": 3,
+            "required": true,
+            "order": 2
+          }
+        ]
+      },
+
+      "program_structure": {
+        "total_credits": 33,
+        "breakdown": {
+          "core_courses": 9,
+          "two_specializations": 18,
+          "capstone": 6
+        },
+        "notes": "Students must complete: 3 core courses (9 credits) + 2 three-course specializations (18 credits) + 2 capstone courses (6 credits) = 33 total credits"
+      },
+
+      "language_requirements": {
+        "applies_to": "International students",
+        "toefl_ibt": 90,
+        "toefl_essentials": 8.5,
+        "ielts": 7.0,
+        "ielts_section_minimum": 6.5,
+        "duolingo": 115
+      }
+    }
+  ]
+}

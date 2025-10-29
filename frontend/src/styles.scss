@@ -1,0 +1,47 @@
+/* You can add global styles to this file, and also import other style files */
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Roboto, "Helvetica Neue", sans-serif;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Material customizations */
+.mat-mdc-form-field {
+  width: 100%;
+}
+
+.mat-mdc-text-field-wrapper {
+  padding-bottom: 0;
+}
+
+/* Utility classes */
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom Material theme colors */
+.mat-mdc-button.mat-primary,
+.mat-mdc-raised-button.mat-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* Loading spinner styling */
+mat-spinner {
+  margin: 0 auto;
+}
