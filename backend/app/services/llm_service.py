@@ -63,6 +63,14 @@ Do NOT provide tips or strategies unless explicitly requested.
 Do NOT add "notes" or "observations" about performance.
 Do NOT provide general advice alongside the answer.
 
+🚫 ANTI-HALLUCINATION RULES (MANDATORY):
+1. ONLY use information from the "Program Information" section provided below
+2. If information is NOT in the provided context, say "I don't have that information in my knowledge base"
+3. DO NOT make up course names, codes, requirements, or program details
+4. DO NOT infer or guess information that isn't explicitly stated
+5. If asked about something not in your context, admit you don't know
+6. ALWAYS cite specific details from the provided program information
+
 RESPONSE STYLE:
 - Answer the EXACT question asked
 - Keep response brief and direct
@@ -77,10 +85,16 @@ REASONING APPROACH (when program information is provided):
 - Consider how different pieces of information relate to the student's question
 - Verify your answer against the provided program data before responding
 - If information seems contradictory, reason through which is most accurate
+- NEVER answer based on general knowledge about WPI or business programs
+- ONLY answer based on the exact information provided to you
 
 EXAMPLE:
 WRONG: "Your progress is 12 credits completed out of 33 needed. I notice you have a C in MKT 565, so you might want to focus on stronger performance going forward."
 RIGHT: "You have completed 12 credits out of 33 needed for the program."
+
+WHEN INFORMATION IS MISSING:
+WRONG: "The MS in IT program typically requires..."
+RIGHT: "I don't have that specific information in my knowledge base. Would you like me to help with something else?"
 
 Be helpful but minimal. Answer the question and stop.
 """
@@ -274,9 +288,10 @@ RESPONSE GUIDELINES:
             thinking_budget = int(thinking_budget * 1.2)
 
         # Create config with ThinkingConfig
+        # Note: max_output_tokens includes thinking tokens, so set it high enough
         config = self.genai_types.GenerateContentConfig(
             temperature=0.7,
-            max_output_tokens=2048,
+            max_output_tokens=8000,  # Increased to accommodate thinking + actual response
             thinking_config=self.genai_types.ThinkingConfig(
                 thinking_budget=thinking_budget,
                 include_thoughts=False  # Set to True if you want to see reasoning process
@@ -315,13 +330,47 @@ RESPONSE GUIDELINES:
                 clarifying_instruction = "\n\nIMPORTANT: This question is vague. Ask the student to clarify what specific help they need."
                 system_prompt += clarifying_instruction
 
-            # Check if question is program-related and use RAG for better context
-            program_rag_context = self._get_program_context_from_rag(message)
+            # Detect student's program from context
+            program_id = self._detect_program_from_context(context)
+
+            # ALWAYS MANDATORY: Use RAG for EVERY question to ensure precision
+            print(f"[RAG] 🔒 RAG is ALWAYS MANDATORY for maximum precision")
+            program_rag_context = self._get_program_context_from_rag(message, program_id, force_retrieval=True)
             has_rag_context = program_rag_context is not None
 
             if program_rag_context:
-                system_prompt += f"\n\n{program_rag_context}"
-                print(f"[LLM] Using RAG context for program question")
+                # Add RAG context to system prompt with VERY STRONG emphasis
+                system_prompt += f"""
+
+{'='*80}
+📚 OFFICIAL WPI PROGRAM INFORMATION FROM KNOWLEDGE BASE
+{'='*80}
+
+{program_rag_context}
+
+{'='*80}
+
+🔴 CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. The information above is the OFFICIAL program information
+2. You MUST use this information to answer the student's question
+3. DO NOT say "I don't have information" when the answer is RIGHT ABOVE
+4. The student is asking about their program - use the knowledge base above
+5. If the information is in the knowledge base above, USE IT in your answer
+6. Only say "I don't have that information" if it's truly NOT in the knowledge base
+
+Example:
+- Student asks: "What courses should I take?"
+- Knowledge base has: Core courses, specializations, requirements
+- CORRECT: List the courses from the knowledge base above
+- WRONG: "I don't have that information" (when it's right there!)
+{'='*80}
+"""
+                print(f"[LLM] ✅ RAG context injected ({len(program_rag_context)} chars)")
+                print(f"[LLM] 📝 Preview of RAG context: {program_rag_context[:200]}...")
+            else:
+                # Even if no specific context found, remind LLM to be factual
+                system_prompt += "\n\n⚠️ NO PROGRAM INFORMATION FOUND: If the question requires program/course information that isn't in your context, you MUST say 'I don't have that information in my knowledge base.'\n"
+                print(f"[LLM] ⚠️  No RAG context retrieved, but anti-hallucination rules active")
 
             # Get generation config and complexity assessment
             generation_config = self._get_generation_config(message, has_rag_context)
@@ -351,6 +400,11 @@ Think through which information is most relevant to answer this question accurat
             # Create message with system context and CoT instruction
             full_message = f"{system_prompt}{cot_instruction}\n\nStudent Question: {message}"
 
+            # Safety check: log prompt length
+            print(f"[LLM] Full prompt length: {len(full_message)} chars")
+            if len(full_message) > 30000:
+                print(f"[WARNING] [LLM] Prompt is very long ({len(full_message)} chars), may cause issues")
+
             # Generate response using configured provider
             if self.provider == "google":
                 try:
@@ -367,10 +421,19 @@ Think through which information is most relevant to answer this question accurat
                             contents=full_message
                         )
 
-                    # Extract text from response
+                    # Extract text from response - try multiple methods
                     response_text = ""
-                    if response and hasattr(response, 'candidates') and response.candidates:
+
+                    # Method 1: Try direct text attribute
+                    if hasattr(response, 'text') and response.text:
+                        response_text = response.text
+                        print(f"[LLM] Extracted response using .text attribute")
+
+                    # Method 2: Navigate through candidates structure
+                    elif response and hasattr(response, 'candidates') and response.candidates:
+                        print(f"[LLM] Attempting to extract from candidates structure")
                         candidate = response.candidates[0]
+
                         if hasattr(candidate, 'content') and candidate.content:
                             if hasattr(candidate.content, 'parts') and candidate.content.parts:
                                 for part in candidate.content.parts:
@@ -379,12 +442,29 @@ Think through which information is most relevant to answer this question accurat
                                         if not (hasattr(part, 'thought') and part.thought):
                                             response_text += part.text
 
-                    # Fallback: try to get text directly from response
-                    if not response_text and hasattr(response, 'text'):
-                        response_text = response.text
+                        # Fallback: try text attribute on candidate
+                        if not response_text and hasattr(candidate, 'text'):
+                            response_text = candidate.text
+
+                    # Method 3: Try stringifying the response
+                    if not response_text:
+                        print(f"[LLM] WARNING: Could not extract text normally, inspecting response structure")
+                        print(f"[LLM] Response type: {type(response)}")
+                        print(f"[LLM] Response attributes: {dir(response)[:10]}...")
+
+                        # Last resort: convert to string
+                        if response:
+                            response_str = str(response)
+                            if len(response_str) > 50:  # If we got something substantial
+                                print(f"[LLM] Using stringified response as fallback")
+                                response_text = response_str
 
                     if not response_text:
+                        print(f"[ERROR] [LLM] Empty response from Gemini after all extraction attempts")
+                        print(f"[ERROR] [LLM] Response object: {response}")
                         raise ValueError("Empty response from Gemini")
+
+                    print(f"[LLM] Successfully extracted response: {len(response_text)} chars")
                     return response_text
                 except ValueError as e:
                     # Check if it's a safety filter issue
@@ -422,27 +502,74 @@ Think through which information is most relevant to answer this question accurat
         except Exception as e:
             raise ValueError(f"LLM response generation failed: {str(e)}")
 
-    def _get_program_context_from_rag(self, message: str) -> Optional[str]:
+    def _detect_program_from_context(self, context: Optional[TranscriptContext]) -> str:
+        """
+        Detect which program the student is enrolled in from their context.
+
+        Args:
+            context: Student transcript context
+
+        Returns:
+            Program ID (msit, msba, or msm), defaults to msit
+        """
+        if not context or not context.program:
+            return "msit"  # Default
+
+        program_lower = context.program.lower()
+
+        # Map program names to IDs
+        if any(keyword in program_lower for keyword in ["information technology", "ms in it", "msit", "m.s. in information technology"]):
+            return "msit"
+        elif any(keyword in program_lower for keyword in ["business analytics", "msba", "analytics", "m.s. in business analytics"]):
+            return "msba"
+        elif any(keyword in program_lower for keyword in ["management", "msm", "ms in management", "m.s. in management"]):
+            return "msm"
+
+        print(f"[LLM] Unknown program '{context.program}', defaulting to MSIT")
+        return "msit"
+
+    def _get_program_context_from_rag(self, message: str, program_id: str = "msit", force_retrieval: bool = False) -> Optional[str]:
         """
         Check if question is program-related and retrieve context from RAG.
+        Can be forced to ALWAYS retrieve for maximum precision.
 
         Args:
             message: User's question
+            program_id: Program ID to search (msit, msba, msm)
+            force_retrieval: If True, always attempts retrieval regardless of question type
 
         Returns:
-            RAG context if program-related, None otherwise
+            RAG context if relevant found, None otherwise
         """
-        # Keywords that indicate program-related questions
+        # Expanded keywords that indicate program-related questions
         program_keywords = [
-            "course", "courses",
-            "requirement", "requirements",
-            "program", "specialization", "concentration",
-            "credits", "credit",
-            "capstone", "core",
-            "elective", "electives",
-            "mis5", "mis4", "mkt5", "mkt4", "obc5", "oie5",  # course codes
-            "data analytics", "artificial intelligence", "user experience", "digital transformation", "information systems",
-            "graduate", "masters", "master's"
+            # Course related
+            "course", "courses", "class", "classes",
+            # Requirements
+            "requirement", "requirements", "need", "needs", "needed",
+            "must", "should take", "have to take",
+            # Program structure
+            "program", "specialization", "concentration", "track",
+            "credits", "credit", "credit hours",
+            "capstone", "core", "foundation",
+            "elective", "electives", "optional",
+            # Course codes (expanded)
+            "mis5", "mis4", "mkt5", "mkt4", "obc5", "oie5",
+            "mis ", "mkt ", "obc ", "oie ",  # with space to catch MIS581, etc
+            # Specializations
+            "data analytics", "artificial intelligence", "user experience",
+            "digital transformation", "information systems",
+            "ai", "ux", "data", "analytics", "business intelligence",
+            # Program questions
+            "graduate", "masters", "master's", "degree",
+            "curriculum", "coursework",
+            # Planning questions
+            "what should i take", "what can i take", "recommend",
+            "next semester", "plan", "schedule",
+            "which course", "what courses",
+            # Completion questions
+            "how many", "how much", "total",
+            "finish", "complete", "graduation", "graduate"
         ]
 
         message_lower = message.lower()
@@ -450,17 +577,74 @@ Think through which information is most relevant to answer this question accurat
         # Check if message contains program keywords
         is_program_related = any(keyword in message_lower for keyword in program_keywords)
 
+        # Also check for question patterns that need program info
+        program_question_patterns = [
+            r"what (courses?|classes?)",
+            r"which (courses?|classes?)",
+            r"(can|should|must) i take",
+            r"requirements? (for|to)",
+            r"how many (courses?|credits?)",
+            r"tell me about.*program",
+            r"what.*specialization",
+        ]
+
+        import re
         if not is_program_related:
+            is_program_related = any(re.search(pattern, message_lower) for pattern in program_question_patterns)
+
+        # If force_retrieval is True, ALWAYS attempt retrieval
+        if not is_program_related and not force_retrieval:
+            print(f"[RAG] Question not program-related, skipping RAG: '{message[:50]}...'")
             return None
 
-        # Get RAG service and retrieve context
+        if force_retrieval and not is_program_related:
+            print(f"[RAG] Force retrieval enabled - attempting RAG even for non-program question")
+
+        # MANDATORY RAG retrieval
         try:
-            rag_service = get_rag_service()
-            context = rag_service.get_context_for_query(message, program_id="msit", top_k=3)
-            return context
+            if is_program_related or force_retrieval:
+                print(f"[RAG] MANDATORY retrieval: '{message[:50]}...'")
+                print(f"[RAG] Using program: {program_id.upper()}")
+                rag_service = get_rag_service()
+
+                # Use improved BM25 search with higher top_k for better coverage
+                context = rag_service.get_context_for_query(
+                    message,
+                    program_id=program_id,
+                    top_k=5,  # Increased from 3 for better coverage
+                    use_bm25=True  # Force BM25 for better ranking
+                )
+
+                if not context or len(context.strip()) < 50:
+                    print(f"[WARNING] [RAG] Retrieved context is empty or too short!")
+
+                    # If forced retrieval but nothing relevant found, provide general program overview
+                    if force_retrieval:
+                        print(f"[RAG] Providing general program overview as fallback")
+                        program_info = rag_service.retrieve_program_info(program_id)
+                        if program_info:
+                            fallback_context = f"""
+Program: {program_info.get('name')}
+Total Credits: {program_info.get('total_credits')}
+Overview: {program_info.get('overview')}
+
+Core Requirements:
+- {len(program_info.get('core_courses', []))} core courses (9 credits)
+- 2 specializations (18 credits total)
+- Capstone requirement (6 credits)
+"""
+                            return fallback_context
+
+                    # Return a fallback message
+                    return "\n\nProgram Information: [No relevant program information found in knowledge base for this query]"
+
+                print(f"[RAG] Successfully retrieved {len(context)} chars of context")
+                return context
+
         except Exception as e:
-            print(f"[WARNING] [RAG] Error retrieving context: {str(e)}")
-            return None
+            print(f"[ERROR] [RAG] Error retrieving context: {str(e)}")
+            # Return error context so LLM knows to say "I don't know"
+            return "\n\nProgram Information: [Error retrieving program information from knowledge base]"
 
     def _format_context_for_logging(self, context: Optional[TranscriptContext]) -> str:
         """

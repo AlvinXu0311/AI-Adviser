@@ -102,9 +102,9 @@ else
 fi
 
 # Check if dependencies are installed
-if ! python3 -m pip show fastapi > /dev/null 2>&1; then
+if ! ./venv/bin/python -m pip show fastapi > /dev/null 2>&1; then
     echo "Installing backend dependencies..."
-    if ! python3 -m pip install -r requirements.txt; then
+    if ! ./venv/bin/pip install -r requirements.txt; then
         echo -e "${RED}✗ Failed to install backend dependencies${NC}"
         echo "  Check your internet connection and try again"
         exit 1
@@ -122,7 +122,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # Start backend in background
-python3 -m uvicorn app.main:app --reload --port 8000 > "../backend.log" 2>&1 &
+./venv/bin/python -m uvicorn app.main:app --reload --port 8000 > "../backend.log" 2>&1 &
 BACKEND_PID=$!
 
 # Give it a moment to start and check if it's still running

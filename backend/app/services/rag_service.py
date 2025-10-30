@@ -1,11 +1,14 @@
 """
 RAG (Retrieval-Augmented Generation) Service for program-related questions.
-Provides local knowledge base retrieval without API calls.
+Provides local knowledge base retrieval with semantic search and BM25 scoring.
 """
 import json
 import os
-from typing import List, Dict, Any, Optional
+import re
+import math
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
+from collections import Counter
 
 
 class RAGService:
@@ -15,8 +18,11 @@ class RAGService:
         """Initialize RAG service with knowledge base"""
         self.knowledge_base = {}
         self.programs = {}
+        self.document_index = {}  # For BM25 scoring
+        self.avg_doc_length = 0
         self.load_knowledge_base()
-        print("[RAG Service] Initialized with local knowledge base")
+        self._build_search_index()
+        print("[RAG Service] Initialized with local knowledge base and BM25 indexing")
 
     def load_knowledge_base(self) -> None:
         """Load knowledge base from JSON files"""
@@ -36,6 +42,130 @@ class RAGService:
 
         except Exception as e:
             print(f"[ERROR] [RAG] Error loading knowledge base: {str(e)}")
+
+    def _build_search_index(self) -> None:
+        """Build inverted index for BM25 scoring"""
+        try:
+            documents = []
+            doc_ids = []
+
+            # Index all searchable content
+            for program_id, program in self.programs.items():
+                # Index program overview
+                doc_id = f"{program_id}_overview"
+                doc_text = program.get("overview", "")
+                documents.append(doc_text)
+                doc_ids.append(doc_id)
+
+                # Index core courses
+                for course in program.get("core_courses", []):
+                    doc_id = f"{program_id}_core_{course['code']}"
+                    doc_text = f"{course['name']} {course.get('description', '')}"
+                    documents.append(doc_text)
+                    doc_ids.append(doc_id)
+
+                # Index specializations
+                for spec in program.get("specializations", []):
+                    doc_id = f"{program_id}_spec_{spec['id']}"
+                    doc_text = spec['name']
+                    for course in spec.get("courses", []):
+                        doc_text += f" {course.get('name', '')} {course.get('description', '')}"
+                    documents.append(doc_text)
+                    doc_ids.append(doc_id)
+
+            # Calculate document statistics
+            total_length = 0
+            for i, doc in enumerate(documents):
+                tokens = self._tokenize(doc)
+                doc_length = len(tokens)
+                total_length += doc_length
+
+                self.document_index[doc_ids[i]] = {
+                    'tokens': Counter(tokens),
+                    'length': doc_length,
+                    'text': doc
+                }
+
+            self.avg_doc_length = total_length / len(documents) if documents else 0
+            print(f"[RAG] Built BM25 index with {len(documents)} documents, avg length: {self.avg_doc_length:.1f}")
+
+        except Exception as e:
+            print(f"[ERROR] [RAG] Error building search index: {str(e)}")
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text for BM25"""
+        # Convert to lowercase and split on non-alphanumeric
+        text = text.lower()
+        tokens = re.findall(r'\b\w+\b', text)
+        return tokens
+
+    def _calculate_bm25_score(self, query_tokens: List[str], doc_id: str, k1: float = 1.5, b: float = 0.75) -> float:
+        """
+        Calculate BM25 score for a document given query tokens.
+
+        Args:
+            query_tokens: Tokenized query
+            doc_id: Document identifier
+            k1: BM25 term frequency saturation parameter (default 1.5)
+            b: BM25 length normalization parameter (default 0.75)
+
+        Returns:
+            BM25 score
+        """
+        if doc_id not in self.document_index:
+            return 0.0
+
+        doc_info = self.document_index[doc_id]
+        doc_tokens = doc_info['tokens']
+        doc_length = doc_info['length']
+
+        score = 0.0
+        N = len(self.document_index)  # Total number of documents
+
+        for term in set(query_tokens):
+            if term not in doc_tokens:
+                continue
+
+            # Calculate IDF
+            df = sum(1 for d in self.document_index.values() if term in d['tokens'])
+            idf = math.log((N - df + 0.5) / (df + 0.5) + 1.0)
+
+            # Calculate term frequency component
+            tf = doc_tokens[term]
+            numerator = tf * (k1 + 1)
+            denominator = tf + k1 * (1 - b + b * (doc_length / self.avg_doc_length))
+
+            score += idf * (numerator / denominator)
+
+        return score
+
+    def search_with_bm25(self, query: str, program_id: str = "msit", top_k: int = 5) -> List[Tuple[str, float, str]]:
+        """
+        Search using BM25 ranking algorithm.
+
+        Args:
+            query: Search query
+            program_id: Program to search in
+            top_k: Number of top results
+
+        Returns:
+            List of (doc_id, score, text) tuples
+        """
+        query_tokens = self._tokenize(query)
+
+        # Calculate scores for all documents in the program
+        scores = []
+        prefix = f"{program_id}_"
+
+        for doc_id, doc_info in self.document_index.items():
+            if doc_id.startswith(prefix):
+                score = self._calculate_bm25_score(query_tokens, doc_id)
+                if score > 0:
+                    scores.append((doc_id, score, doc_info['text']))
+
+        # Sort by score and return top_k
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return scores[:top_k]
 
     def retrieve_program_info(self, program_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -235,19 +365,45 @@ class RAGService:
             })
         return specs
 
-    def get_context_for_query(self, query: str, program_id: str = "msit", top_k: int = 5) -> str:
+    def get_context_for_query(self, query: str, program_id: str = "msit", top_k: int = 5, use_bm25: bool = True) -> str:
         """
         Get relevant context from knowledge base for LLM prompt.
+        Uses hybrid search: BM25 + keyword matching for best results.
 
         Args:
             query: User query
             program_id: Program identifier
             top_k: Number of top results to return
+            use_bm25: Whether to use BM25 scoring (default True)
 
         Returns:
             Formatted context string
         """
-        # Search for relevant information
+        # Use BM25 search if enabled and index is available
+        if use_bm25 and self.document_index:
+            print(f"[RAG] Using BM25 search for query: '{query}'")
+            bm25_results = self.search_with_bm25(query, program_id, top_k)
+
+            if bm25_results:
+                context = "Relevant Program Information (BM25 Ranked):\n\n"
+                for i, (doc_id, score, text) in enumerate(bm25_results, 1):
+                    # Parse doc_id to determine type
+                    parts = doc_id.split('_')
+                    if 'overview' in doc_id:
+                        context += f"{i}. Program Overview (relevance: {score:.2f}):\n"
+                        context += f"   {text}\n\n"
+                    elif 'core' in doc_id:
+                        context += f"{i}. Core Course (relevance: {score:.2f}):\n"
+                        context += f"   {text}\n\n"
+                    elif 'spec' in doc_id:
+                        context += f"{i}. Specialization (relevance: {score:.2f}):\n"
+                        context += f"   {text}\n\n"
+                print(f"[RAG] Found {len(bm25_results)} relevant documents with BM25")
+                print(f"[RAG] Context preview (first 300 chars): {context[:300]}...")
+                return context
+
+        # Fallback to keyword search
+        print(f"[RAG] Using keyword search for query: '{query}'")
         search_results = self.search_by_keyword(query, program_id)
 
         if not search_results:

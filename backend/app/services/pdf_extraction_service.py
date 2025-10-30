@@ -142,13 +142,17 @@ class PDFExtractionService:
                     print(f"   [INFO] Found ID: {data.student_id}")
                     break
 
-            # Extract GPA - multiple patterns
+            # Extract GPA - multiple patterns with improved robustness
             gpa_patterns = [
                 r"(?:cumulative\s+)?gpa[:\s]*(\d+\.?\d{0,2})",
-                r"grade\s+point\s+average[:\s]*(\d+\.?\d{0,2})"
+                r"grade\s+point\s+average[:\s]*(\d+\.?\d{0,2})",
+                r"gpa[:\s]+(\d+\.?\d{0,2})\s*(?:/|out\s+of)?\s*(?:4\.0)?",
+                r"cumulative[:\s]*(\d+\.?\d{0,2})",
+                r"overall\s+gpa[:\s]*(\d+\.?\d{0,2})",
+                r"(?:current|term)\s+gpa[:\s]*(\d+\.?\d{0,2})"
             ]
             for pattern in gpa_patterns:
-                match = re.search(pattern, raw_text, re.IGNORECASE)
+                match = re.search(pattern, raw_text, re.IGNORECASE | re.MULTILINE)
                 if match:
                     try:
                         gpa = float(match.group(1))
@@ -265,6 +269,9 @@ Return the data in this JSON format ONLY (no markdown code blocks, just pure JSO
 
 VALIDATION RULES:
 - GPA: Must be a decimal number between 0.0 and 4.0, OR null if not found
+  * Look for: "GPA:", "Cumulative GPA:", "Overall GPA:", "Grade Point Average:", "Current GPA:", "Term GPA:"
+  * Extract the numeric value only (e.g., if you see "GPA: 3.85 / 4.0", extract 3.85)
+  * Common formats: "3.85", "3.5", "2.75", etc.
 - Grades: Use only letter grades (A, B, C, D, F) with optional +/-, or null
 - Credits: Must be numeric, OR null if not specified
 - Course codes: MUST match the pattern in the transcript (e.g., "IT504", "CS101", "MBA502")
@@ -279,6 +286,7 @@ STRICT RULES:
 4. Do NOT try to be helpful by adding missing information
 5. Do NOT normalize or reformat data
 6. Return valid JSON that can be parsed
+7. PAY SPECIAL ATTENTION to GPA - it is critically important and often labeled clearly in transcripts
 
 Here is the COMPLETE raw transcript text to analyze:
 {raw_text}

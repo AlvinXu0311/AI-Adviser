@@ -153,3 +153,4 @@ database/backups/*.dump
 .claude/
 .venv/
 frontend/.vscode
+.chatbot_pids

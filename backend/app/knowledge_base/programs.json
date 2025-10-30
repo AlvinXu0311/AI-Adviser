@@ -50,120 +50,202 @@
         {
           "id": "ai_business",
           "name": "Artificial Intelligence in Business",
+          "description": "Focus on AI applications in business contexts",
           "courses": [
             {
               "code": "MIS587",
               "name": "Business Applications in Machine Learning",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Machine learning techniques for business applications"
             },
             {
-              "code": "MIS520_or_MIS581",
-              "name": "Choose: MIS 520 or MIS 581",
+              "code": "MIS520_OR_MIS581",
+              "name": "AI and Ethics OR Policy and Strategy",
               "credits": 3,
-              "options": ["MIS520", "MIS581"]
+              "required": true,
+              "options": [
+                {
+                  "code": "MIS520",
+                  "name": "Artificial Intelligence and its Ethical Applications in Business"
+                },
+                {
+                  "code": "MIS581",
+                  "name": "Policy and Strategy for Information Technology, Artificial Intelligence, and Analytics"
+                }
+              ],
+              "description": "Choose between AI ethics or IT policy and strategy"
             },
             {
-              "code": "elective_1",
-              "name": "Choose: MKT 562, MKT 568, or OIE 552",
+              "code": "ELECTIVE_AI",
+              "name": "Marketing or Process Optimization Elective",
               "credits": 3,
-              "options": ["MKT562", "MKT568", "OIE552"]
+              "required": true,
+              "options": [
+                {
+                  "code": "MKT562",
+                  "name": "Marketing Research"
+                },
+                {
+                  "code": "MKT568",
+                  "name": "Marketing Analytics"
+                },
+                {
+                  "code": "OIE552",
+                  "name": "Modeling and Optimizing Processes"
+                }
+              ],
+              "description": "Choose one elective from marketing research, analytics, or process optimization"
             }
           ]
         },
         {
           "id": "is_design",
           "name": "Information Systems Design",
+          "description": "Focus on designing and securing information systems",
           "courses": [
             {
               "code": "MIS571",
               "name": "Database Applications Design and Development",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Database design and application development"
             },
             {
               "code": "MIS582",
               "name": "Information Security Management",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Information security principles and management"
             },
             {
               "code": "MIS585",
               "name": "User Experience Design",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "UX design principles and practices"
             }
           ]
         },
         {
           "id": "data_analytics",
           "name": "Data Analytics",
+          "description": "Focus on data analytics and machine learning",
           "courses": [
             {
               "code": "MIS587",
               "name": "Business Applications in Machine Learning",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Machine learning for business analytics"
             },
             {
               "code": "MKT568",
               "name": "Marketing Analytics",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Analytics applied to marketing problems"
             },
             {
-              "code": "elective_2",
-              "name": "Choose: MKT 565 or MKT 562",
+              "code": "MKT_ELECTIVE",
+              "name": "Digital Marketing OR Marketing Research",
               "credits": 3,
-              "options": ["MKT565", "MKT562"]
+              "required": true,
+              "options": [
+                {
+                  "code": "MKT565",
+                  "name": "Digital Marketing"
+                },
+                {
+                  "code": "MKT562",
+                  "name": "Marketing Research"
+                }
+              ],
+              "description": "Choose between digital marketing or marketing research"
             }
           ]
         },
         {
           "id": "digital_transformation",
           "name": "Digital Transformation",
+          "description": "Focus on innovation and organizational transformation",
           "courses": [
             {
               "code": "MIS500",
               "name": "Innovation with Information Systems",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Innovation strategies with information systems"
             },
             {
-              "code": "ops_choice",
-              "name": "Choice among operations courses",
+              "code": "OPS_ELECTIVE",
+              "name": "Operations Management Elective",
               "credits": 3,
-              "options": ["Operations courses"]
+              "required": true,
+              "options": [
+                {
+                  "code": "OIE501",
+                  "name": "Operations Management"
+                },
+                {
+                  "code": "OIE544",
+                  "name": "Supply Chain Analysis and Design"
+                },
+                {
+                  "code": "OIE558",
+                  "name": "Designing and Managing Lean Six Sigma Processes"
+                }
+              ],
+              "description": "Choose one operations management course"
             },
             {
-              "code": "pm_choice",
-              "name": "Choice among project management/leadership courses",
+              "code": "MGMT_ELECTIVE",
+              "name": "Project Management or Leadership Elective",
               "credits": 3,
-              "options": ["Project Management", "Leadership courses"]
+              "required": true,
+              "options": [
+                {
+                  "code": "MIS576",
+                  "name": "Project Management"
+                },
+                {
+                  "code": "OBC533",
+                  "name": "Negotiations"
+                },
+                {
+                  "code": "OBC537",
+                  "name": "Leading Change"
+                }
+              ],
+              "description": "Choose one project management or leadership course"
             }
           ]
         },
         {
           "id": "ux_user_experience",
           "name": "IT User Experience",
+          "description": "Focus on user experience design and research",
           "courses": [
             {
               "code": "MIS583",
               "name": "User Experience Applications",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Practical UX applications"
             },
             {
               "code": "MIS586",
               "name": "User Experience Methods",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "UX research methods and techniques"
             },
             {
               "code": "MKT561",
               "name": "Consumer Behavior and Analytics",
               "credits": 3,
-              "required": true
+              "required": true,
+              "description": "Understanding consumer behavior through analytics"
             }
           ]
         }
@@ -180,14 +262,16 @@
             "name": "Teaming and Organizing for Innovation",
             "credits": 3,
             "required": true,
-            "order": 1
+            "order": 1,
+            "description": "Team dynamics and organizational innovation"
           },
           {
             "code": "MIS573",
             "name": "System Design and Development",
             "credits": 3,
             "required": true,
-            "order": 2
+            "order": 2,
+            "description": "Complete system design and development capstone project"
           }
         ]
       },
@@ -199,7 +283,7 @@
           "two_specializations": 18,
           "capstone": 6
         },
-        "notes": "Students must complete: 3 core courses (9 credits) + 2 three-course specializations (18 credits) + 2 capstone courses (6 credits) = 33 total credits"
+        "notes": "Students must complete: 3 core courses (9 credits) + 2 three-course specializations (18 credits) + 2 capstone courses (6 credits) = 33 total credits. You MUST choose TWO different specializations from the five available."
       },
 
       "language_requirements": {
@@ -209,6 +293,13 @@
         "ielts": 7.0,
         "ielts_section_minimum": 6.5,
         "duolingo": 115
+      },
+
+      "important_notes": {
+        "specialization_requirement": "You must complete TWO different three-course specializations (not just one)",
+        "internship_option": "International students on-campus are encouraged to complete up to three additional internship credits",
+        "course_selection": "Many specialization courses have options - you choose one course from the listed alternatives",
+        "capstone_timing": "Capstone courses are typically taken near the end of the program"
       }
     }
   ]
