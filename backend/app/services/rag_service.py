@@ -1,500 +1,464 @@
 """
-RAG (Retrieval-Augmented Generation) Service for program-related questions.
-Provides local knowledge base retrieval with semantic search and BM25 scoring.
+RAG (Retrieval-Augmented Generation) Service for knowledge base retrieval.
+Provides BM25-based search over program information, courses, and specializations.
 """
 import json
+import logging
 import os
-import re
-import math
-from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
-from collections import Counter
+from typing import Dict, List, Any, Optional
+from rank_bm25 import BM25Okapi
+
+logger = logging.getLogger(__name__)
 
 
 class RAGService:
-    """Service for retrieving program information from knowledge base"""
+    """
+    RAG service for retrieving relevant program information from knowledge base.
+    Uses BM25 algorithm for efficient keyword-based search.
+    """
 
     def __init__(self):
-        """Initialize RAG service with knowledge base"""
-        self.knowledge_base = {}
-        self.programs = {}
-        self.document_index = {}  # For BM25 scoring
-        self.avg_doc_length = 0
-        self.load_knowledge_base()
-        self._build_search_index()
-        print("[RAG Service] Initialized with local knowledge base and BM25 indexing")
+        """Initialize RAG service with knowledge base and BM25 indexing"""
+        self.knowledge_base = self._load_knowledge_base()
+        self.documents = self._build_documents()
+        self.bm25 = self._build_bm25_index()
+        logger.info(f"RAG Service initialized with {len(self.documents)} documents")
 
-    def load_knowledge_base(self) -> None:
-        """Load knowledge base from JSON files"""
+    def _load_knowledge_base(self) -> Dict[str, Any]:
+        """Load program information from knowledge base JSON"""
         try:
-            kb_path = Path(__file__).parent.parent / "knowledge_base"
+            # Find the knowledge base file
+            kb_path = os.path.join(
+                os.path.dirname(__file__),
+                "../knowledge_base/programs.json"
+            )
 
-            # Load programs
-            programs_file = kb_path / "programs.json"
-            if programs_file.exists():
-                with open(programs_file, "r") as f:
-                    data = json.load(f)
-                    for program in data.get("programs", []):
-                        self.programs[program["id"]] = program
-                print(f"[RAG] Loaded {len(self.programs)} programs")
-            else:
-                print(f"[WARNING] [RAG] Programs file not found: {programs_file}")
+            if not os.path.exists(kb_path):
+                # Fallback: try from current directory
+                kb_path = "backend/app/knowledge_base/programs.json"
 
+            if not os.path.exists(kb_path):
+                logger.warning(f"Knowledge base not found at {kb_path}")
+                return {"programs": []}
+
+            with open(kb_path, 'r') as f:
+                kb = json.load(f)
+
+            logger.info(f"Loaded knowledge base with {len(kb.get('programs', []))} programs")
+            return kb
         except Exception as e:
-            print(f"[ERROR] [RAG] Error loading knowledge base: {str(e)}")
+            logger.error(f"Error loading knowledge base: {str(e)}")
+            return {"programs": []}
 
-    def _build_search_index(self) -> None:
-        """Build inverted index for BM25 scoring"""
-        try:
-            documents = []
-            doc_ids = []
+    def _build_documents(self) -> List[Dict[str, Any]]:
+        """Build searchable documents from knowledge base"""
+        documents = []
 
-            # Index all searchable content
-            for program_id, program in self.programs.items():
-                # Index program overview
-                doc_id = f"{program_id}_overview"
-                doc_text = program.get("overview", "")
-                documents.append(doc_text)
-                doc_ids.append(doc_id)
+        # Process each program
+        for program in self.knowledge_base.get("programs", []):
+            program_id = program.get("id", "")
+            program_name = program.get("name", "")
 
-                # Index core courses
-                for course in program.get("core_courses", []):
-                    doc_id = f"{program_id}_core_{course['code']}"
-                    doc_text = f"{course['name']} {course.get('description', '')}"
-                    documents.append(doc_text)
-                    doc_ids.append(doc_id)
+            # Add program overview document
+            if program.get("overview"):
+                documents.append({
+                    "type": "program_overview",
+                    "program_id": program_id,
+                    "program_name": program_name,
+                    "text": f"{program_name}. {program.get('overview', '')}",
+                    "metadata": {
+                        "credits": program.get("total_credits"),
+                        "duration": program.get("duration_semester"),
+                        "format": program.get("format", [])
+                    }
+                })
 
-                # Index specializations
-                for spec in program.get("specializations", []):
-                    doc_id = f"{program_id}_spec_{spec['id']}"
-                    doc_text = spec['name']
-                    for course in spec.get("courses", []):
-                        doc_text += f" {course.get('name', '')} {course.get('description', '')}"
-                    documents.append(doc_text)
-                    doc_ids.append(doc_id)
+            # Add core courses as documents
+            for course in program.get("core_courses", []):
+                course_code = course.get("code", "")
+                course_name = course.get("name", "")
+                documents.append({
+                    "type": "course",
+                    "program_id": program_id,
+                    "program_name": program_name,
+                    "text": f"{course_code} {course_name}. {course.get('description', '')}",
+                    "metadata": {
+                        "course_code": course_code,
+                        "course_name": course_name,
+                        "credits": course.get("credits"),
+                        "required": course.get("required", False),
+                        "skills": course.get("skills", [])
+                    }
+                })
 
-            # Calculate document statistics
-            total_length = 0
-            for i, doc in enumerate(documents):
-                tokens = self._tokenize(doc)
-                doc_length = len(tokens)
-                total_length += doc_length
-
-                self.document_index[doc_ids[i]] = {
-                    'tokens': Counter(tokens),
-                    'length': doc_length,
-                    'text': doc
-                }
-
-            self.avg_doc_length = total_length / len(documents) if documents else 0
-            print(f"[RAG] Built BM25 index with {len(documents)} documents, avg length: {self.avg_doc_length:.1f}")
-
-        except Exception as e:
-            print(f"[ERROR] [RAG] Error building search index: {str(e)}")
-
-    def _tokenize(self, text: str) -> List[str]:
-        """Tokenize text for BM25"""
-        # Convert to lowercase and split on non-alphanumeric
-        text = text.lower()
-        tokens = re.findall(r'\b\w+\b', text)
-        return tokens
-
-    def _calculate_bm25_score(self, query_tokens: List[str], doc_id: str, k1: float = 1.5, b: float = 0.75) -> float:
-        """
-        Calculate BM25 score for a document given query tokens.
-
-        Args:
-            query_tokens: Tokenized query
-            doc_id: Document identifier
-            k1: BM25 term frequency saturation parameter (default 1.5)
-            b: BM25 length normalization parameter (default 0.75)
-
-        Returns:
-            BM25 score
-        """
-        if doc_id not in self.document_index:
-            return 0.0
-
-        doc_info = self.document_index[doc_id]
-        doc_tokens = doc_info['tokens']
-        doc_length = doc_info['length']
-
-        score = 0.0
-        N = len(self.document_index)  # Total number of documents
-
-        for term in set(query_tokens):
-            if term not in doc_tokens:
-                continue
-
-            # Calculate IDF
-            df = sum(1 for d in self.document_index.values() if term in d['tokens'])
-            idf = math.log((N - df + 0.5) / (df + 0.5) + 1.0)
-
-            # Calculate term frequency component
-            tf = doc_tokens[term]
-            numerator = tf * (k1 + 1)
-            denominator = tf + k1 * (1 - b + b * (doc_length / self.avg_doc_length))
-
-            score += idf * (numerator / denominator)
-
-        return score
-
-    def search_with_bm25(self, query: str, program_id: str = "msit", top_k: int = 5) -> List[Tuple[str, float, str]]:
-        """
-        Search using BM25 ranking algorithm.
-
-        Args:
-            query: Search query
-            program_id: Program to search in
-            top_k: Number of top results
-
-        Returns:
-            List of (doc_id, score, text) tuples
-        """
-        query_tokens = self._tokenize(query)
-
-        # Calculate scores for all documents in the program
-        scores = []
-        prefix = f"{program_id}_"
-
-        for doc_id, doc_info in self.document_index.items():
-            if doc_id.startswith(prefix):
-                score = self._calculate_bm25_score(query_tokens, doc_id)
-                if score > 0:
-                    scores.append((doc_id, score, doc_info['text']))
-
-        # Sort by score and return top_k
-        scores.sort(key=lambda x: x[1], reverse=True)
-        return scores[:top_k]
-
-    def retrieve_program_info(self, program_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve complete program information.
-
-        Args:
-            program_id: Program identifier (e.g., 'msit')
-
-        Returns:
-            Program information dict or None
-        """
-        return self.programs.get(program_id)
-
-    def search_by_keyword(self, query: str, program_id: str = "msit") -> List[Dict[str, Any]]:
-        """
-        Search program information by keyword.
-
-        Args:
-            query: Search query
-            program_id: Program to search in
-
-        Returns:
-            List of relevant information chunks
-        """
-        results = []
-        program = self.programs.get(program_id)
-        if not program:
-            return results
-
-        query_lower = query.lower()
-        results_dict = {}
-
-        # Search in program overview
-        if query_lower in program.get("overview", "").lower():
-            results_dict["overview"] = {
-                "type": "overview",
-                "content": program["overview"]
-            }
-
-        # Search in core courses
-        for course in program.get("core_courses", []):
-            if (query_lower in course.get("name", "").lower() or
-                    query_lower in course.get("code", "").lower() or
-                    query_lower in course.get("description", "").lower()):
-                results_dict[f"core_{course['code']}"] = {
-                    "type": "core_course",
-                    "code": course["code"],
-                    "name": course["name"],
-                    "credits": course["credits"],
-                    "description": course.get("description", "")
-                }
-
-        # Search in specializations
-        for spec in program.get("specializations", []):
-            if query_lower in spec.get("name", "").lower():
-                results_dict[f"spec_{spec['id']}"] = {
+            # Add specializations
+            for spec in program.get("specializations", []):
+                spec_name = spec.get("name", "")
+                documents.append({
                     "type": "specialization",
-                    "name": spec["name"],
-                    "courses": spec.get("courses", [])  # Keep as full objects with details
-                }
-            # Search in specialization courses
-            for course in spec.get("courses", []):
-                if (query_lower in course.get("name", "").lower() or
-                        query_lower in course.get("code", "").lower()):
-                    # When we find a course, also include its specialization
-                    if f"spec_{spec['id']}" not in results_dict:
-                        results_dict[f"spec_{spec['id']}"] = {
-                            "type": "specialization",
-                            "name": spec["name"],
-                            "courses": spec.get("courses", [])
-                        }
-                    # Also add the individual course
-                    results_dict[f"spec_course_{course.get('code')}"] = {
-                        "type": "specialization_course",
-                        "specialization": spec["name"],
-                        "code": course.get("code"),
-                        "name": course.get("name"),
-                        "credits": course.get("credits")
+                    "program_id": program_id,
+                    "program_name": program_name,
+                    "text": f"{spec_name} Specialization. {spec.get('description', '')}",
+                    "metadata": {
+                        "specialization": spec_name,
+                        "courses": spec.get("required_courses", [])
                     }
+                })
 
-        # Search in capstone
-        capstone = program.get("capstone", {})
-        if query_lower in "capstone" or query_lower in str(capstone).lower():
-            capstone_info = {
-                "type": "capstone",
-                "required": capstone.get("required"),
-                "credits": capstone.get("credits"),
-                "courses": [
-                    {
-                        "code": c.get('code'),
-                        "name": c.get('name'),
-                        "credits": c.get('credits')
-                    }
-                    for c in capstone.get("courses", [])
-                ]
-            }
-            results_dict["capstone"] = capstone_info
+            # Add prerequisites
+            if program.get("prerequisites"):
+                prereq_text = json.dumps(program.get("prerequisites"))
+                documents.append({
+                    "type": "prerequisites",
+                    "program_id": program_id,
+                    "program_name": program_name,
+                    "text": f"Requirements and prerequisites for {program_name}. {prereq_text}",
+                    "metadata": program.get("prerequisites", {})
+                })
 
-        return list(results_dict.values())
+        logger.info(f"Built {len(documents)} searchable documents")
+        return documents
 
-    def get_program_requirements(self, program_id: str = "msit") -> Dict[str, Any]:
-        """
-        Get full program requirements breakdown.
+    def _build_bm25_index(self) -> BM25Okapi:
+        """Build BM25 index from documents"""
+        try:
+            # Tokenize documents
+            tokenized_docs = [
+                doc["text"].lower().split()
+                for doc in self.documents
+            ]
 
-        Args:
-            program_id: Program identifier
-
-        Returns:
-            Program requirements dictionary
-        """
-        program = self.programs.get(program_id)
-        if not program:
-            return {}
-
-        return {
-            "program_name": program.get("name"),
-            "total_credits": program.get("total_credits"),
-            "structure": program.get("program_structure", {}),
-            "core_courses": program.get("core_courses", []),
-            "specializations_count": len(program.get("specializations", [])),
-            "capstone_required": program.get("capstone", {}).get("required"),
-            "capstone_credits": program.get("capstone", {}).get("credits")
-        }
-
-    def get_course_info(self, course_code: str, program_id: str = "msit") -> Optional[Dict[str, Any]]:
-        """
-        Get information about a specific course.
-
-        Args:
-            course_code: Course code (e.g., 'MIS581')
-            program_id: Program identifier
-
-        Returns:
-            Course information or None
-        """
-        program = self.programs.get(program_id)
-        if not program:
+            bm25 = BM25Okapi(tokenized_docs)
+            logger.info("BM25 index built successfully")
+            return bm25
+        except Exception as e:
+            logger.error(f"Error building BM25 index: {str(e)}")
             return None
 
-        course_code_upper = course_code.upper()
-
-        # Search in core courses
-        for course in program.get("core_courses", []):
-            if course["code"].upper() == course_code_upper:
-                return {
-                    "type": "core_course",
-                    **course
-                }
-
-        # Search in specializations
-        for spec in program.get("specializations", []):
-            for course in spec.get("courses", []):
-                if course.get("code", "").upper() == course_code_upper:
-                    return {
-                        "type": "specialization_course",
-                        "specialization": spec["name"],
-                        **course
-                    }
-
-        # Search in capstone
-        for course in program.get("capstone", {}).get("courses", []):
-            if course["code"].upper() == course_code_upper:
-                return {
-                    "type": "capstone_course",
-                    **course
-                }
-
-        return None
-
-    def get_specializations(self, program_id: str = "msit") -> List[Dict[str, Any]]:
+    def _detect_query_intent(self, query: str) -> dict:
         """
-        Get all available specializations.
+        Detect whether query is about graduation requirements vs prerequisites/admission.
+
+        Returns dict with intent analysis:
+        - graduation_focus: True if asking about courses to take
+        - admission_focus: True if asking about admission criteria
+        - emphasize_courses: Boost for core_courses type
+        - emphasize_prerequisites: Boost for prerequisites type
+        - force_course_search: If True, force inclusion of courses even with low scores
+        """
+        query_lower = query.lower()
+
+        # Keywords indicating graduation/course requirements
+        graduation_keywords = {
+            'graduate', 'graduation', 'complete', 'completing', 'finish',
+            'finishing', 'earn', 'degree', 'core', 'core courses', 'core course',
+            'take', 'courses to take', 'must take', 'required courses',
+            'graduation requirement', 'required to graduate', 'required to complete'
+        }
+
+        # Keywords indicating prerequisites/admission
+        admission_keywords = {
+            'prerequisite', 'prerequisites', 'enrollment', 'enroll', 'admission',
+            'apply', 'application', 'admitted', 'requirement to enroll',
+            'requirement to apply', 'before enrollment', 'before applying'
+        }
+
+        graduation_count = sum(1 for kw in graduation_keywords if kw in query_lower)
+        admission_count = sum(1 for kw in admission_keywords if kw in query_lower)
+
+        # Check if query is asking about "requirements" in a graduation context
+        # (i.e., has graduation keywords or asks about program requirements without admission context)
+        has_graduation_keywords = graduation_count > 0
+        has_admission_keywords = admission_count > 0
+
+        # "graduation requirements" should be treated as graduation context
+        is_graduation_context = has_graduation_keywords or (
+            'requirements' in query_lower and 'enrollment' not in query_lower and
+            'admission' not in query_lower and 'prerequisite' not in query_lower
+        )
+
+        return {
+            'graduation_focus': is_graduation_context,
+            'admission_focus': has_admission_keywords and graduation_count == 0,
+            'emphasize_courses': 300 if is_graduation_context else 0,
+            'emphasize_prerequisites': 300 if (has_admission_keywords and graduation_count == 0) else 0,
+            'force_course_search': is_graduation_context,  # Force inclusion of courses
+            'graduation_count': graduation_count,
+            'admission_count': admission_count
+        }
+
+    def get_context_for_query(
+        self,
+        query: str,
+        program_id: str = "msit",
+        top_k: int = 5,
+        use_bm25: bool = True
+    ) -> str:
+        """
+        Retrieve relevant context for a query using BM25 search.
+        Prioritizes program-specific results and removes duplicates.
+        Intelligently distinguishes between graduation requirements (courses) and prerequisites (admission).
 
         Args:
-            program_id: Program identifier
-
-        Returns:
-            List of specializations
-        """
-        program = self.programs.get(program_id)
-        if not program:
-            return []
-
-        specs = []
-        for spec in program.get("specializations", []):
-            specs.append({
-                "id": spec.get("id"),
-                "name": spec.get("name"),
-                "course_count": len(spec.get("courses", [])),
-                "courses": [
-                    {
-                        "code": c.get("code"),
-                        "name": c.get("name")
-                    }
-                    for c in spec.get("courses", [])
-                ]
-            })
-        return specs
-
-    def get_context_for_query(self, query: str, program_id: str = "msit", top_k: int = 5, use_bm25: bool = True) -> str:
-        """
-        Get relevant context from knowledge base for LLM prompt.
-        Uses hybrid search: BM25 + keyword matching for best results.
-
-        Args:
-            query: User query
-            program_id: Program identifier
+            query: User's question
+            program_id: Program to prioritize in search
             top_k: Number of top results to return
-            use_bm25: Whether to use BM25 scoring (default True)
+            use_bm25: Whether to use BM25 ranking (vs simple filtering)
 
         Returns:
-            Formatted context string
+            Formatted context string with relevant information
         """
-        # Use BM25 search if enabled and index is available
-        if use_bm25 and self.document_index:
-            print(f"[RAG] Using BM25 search for query: '{query}'")
-            bm25_results = self.search_with_bm25(query, program_id, top_k)
+        try:
+            logger.info(f"RAG query: {query[:50]}... (program: {program_id}, top_k: {top_k})")
 
-            if bm25_results:
-                context = "Relevant Program Information (BM25 Ranked):\n\n"
-                for i, (doc_id, score, text) in enumerate(bm25_results, 1):
-                    # Parse doc_id to determine type
-                    parts = doc_id.split('_')
-                    if 'overview' in doc_id:
-                        context += f"{i}. Program Overview (relevance: {score:.2f}):\n"
-                        context += f"   {text}\n\n"
-                    elif 'core' in doc_id:
-                        context += f"{i}. Core Course (relevance: {score:.2f}):\n"
-                        context += f"   {text}\n\n"
-                    elif 'spec' in doc_id:
-                        context += f"{i}. Specialization (relevance: {score:.2f}):\n"
-                        context += f"   {text}\n\n"
-                print(f"[RAG] Found {len(bm25_results)} relevant documents with BM25")
-                print(f"[RAG] Context preview (first 300 chars): {context[:300]}...")
-                return context
+            if not self.bm25 or not self.documents:
+                logger.warning("RAG index not available")
+                return ""
 
-        # Fallback to keyword search
-        print(f"[RAG] Using keyword search for query: '{query}'")
-        search_results = self.search_by_keyword(query, program_id)
+            # Detect query intent to prioritize correct requirement type
+            intent = self._detect_query_intent(query)
+            logger.info(f"Query intent: graduation={intent['graduation_focus']}, admission={intent['admission_focus']}")
 
-        if not search_results:
-            # If no specific results, provide general program info
-            program = self.programs.get(program_id)
-            if program:
-                capstone = program.get('capstone', {})
-                capstone_courses = capstone.get('courses', [])
-                capstone_course_list = []
-                if capstone_courses:
-                    for c in capstone_courses:
-                        capstone_course_list.append(f"{c.get('code')} ({c.get('credits')} cr)")
-                    capstone_description = ", ".join(capstone_course_list)
+            # Tokenize query
+            query_tokens = query.lower().split()
+
+            # Get BM25 scores
+            scores = self.bm25.get_scores(query_tokens)
+
+            # Rank documents by score, with smart type boosting based on query intent
+            def sort_key(idx):
+                doc = self.documents[idx]
+                score = scores[idx]
+                doc_type = doc.get("type", "")
+                doc_program = doc.get("program_id", "")
+
+                # Apply score boost if from target program
+                program_boost = 1000 if doc_program == program_id else 0
+
+                # Apply type priority with query-intent-aware boosting
+                type_priority = {
+                    "course": 100,
+                    "prerequisites": 50,
+                    "program_overview": 30,
+                    "specialization": 10,
+                    "unknown": 0
+                }
+                type_boost = type_priority.get(doc_type, 0)
+
+                # Add intent-based emphasis
+                # If query is about graduation, significantly boost course documents
+                if intent['graduation_focus'] and doc_type == "course":
+                    type_boost += intent['emphasize_courses']
+
+                # If query is about admission/prerequisites, boost prerequisites
+                if intent['admission_focus'] and doc_type == "prerequisites":
+                    type_boost += intent['emphasize_prerequisites']
+
+                # If score is 0 but it's a course from target program, give it a baseline score
+                # This ensures all courses are included even if query doesn't mention their keywords
+                if score == 0 and doc_type == "course" and doc_program == program_id:
+                    score = 0.1  # Small baseline score so courses get included
+
+                return (program_boost + type_boost, score)
+
+            ranked_indices = sorted(range(len(scores)), key=sort_key, reverse=True)
+
+            # Track seen documents to avoid duplicates
+            seen_docs = set()
+            results = []
+
+            for idx in ranked_indices:
+                if len(results) >= top_k:
+                    break
+
+                doc = self.documents[idx]
+
+                # Skip if we've already added this course/document
+                doc_type = doc.get("type", "")
+                if doc_type == "course":
+                    doc_key = (doc_type, doc.get("metadata", {}).get("course_code", ""))
+                elif doc_type == "prerequisites":
+                    doc_key = (doc_type, doc.get("program_id", ""))
                 else:
-                    capstone_description = "OBC505, MIS573"
+                    doc_key = (doc_type, doc.get("program_id", ""))
 
-                core_codes = ", ".join([c.get('code') for c in program.get('core_courses', [])])
-                spec_names = ", ".join([s.get('name') for s in program.get('specializations', [])])
+                if doc_key in seen_docs:
+                    logger.debug(f"Skipping duplicate: {doc_key}")
+                    continue
 
-                context = f"""
-Program Information: {program.get('name')}
-Total Credits Required: {program.get('total_credits')}
+                seen_docs.add(doc_key)
 
-Program Structure:
-- 3 Core Courses (9 credits)
-  Core: {core_codes}
+                # Include document if:
+                # 1. It has relevance score > 0, OR
+                # 2. It's a course from target program and query is graduation-focused (force_course_search)
+                is_course_from_target = (doc_type == "course" and doc.get("program_id") == program_id)
+                should_include_zero_score = is_course_from_target and intent.get('force_course_search', False)
 
-- 2 Specializations (18 credits)
-  Must choose 2 specializations from: {spec_names}
+                if scores[idx] > 0 or should_include_zero_score:
+                    results.append(doc)
+                else:
+                    logger.debug(f"Skipping low-score document: {scores[idx]}")
 
-- Capstone (6 credits) - REQUIRED
-  Take 2 courses: {capstone_description}
+            if not results:
+                logger.warning(f"No relevant documents found for query: {query[:50]}")
+                return "No relevant information found."
+
+            # Format results
+            context_parts = []
+
+            # Separate by program first, prioritize target program
+            primary_docs = [d for d in results if d.get("program_id") == program_id]
+            secondary_docs = [d for d in results if d.get("program_id") != program_id]
+
+            all_results = primary_docs + secondary_docs
+
+            # Group by type for better organization
+            by_type = {}
+            for doc in all_results:
+                doc_type = doc.get("type", "unknown")
+                if doc_type not in by_type:
+                    by_type[doc_type] = []
+                by_type[doc_type].append(doc)
+
+            # Format by type, with program-specific focus
+            target_program_name = None
+            for program in self.knowledge_base.get("programs", []):
+                if program.get("id") == program_id:
+                    target_program_name = program.get("name", "")
+                    break
+
+            if "program_overview" in by_type:
+                # Only show target program overview
+                target_overview = [d for d in by_type["program_overview"] if d.get("program_id") == program_id]
+                if target_overview:
+                    context_parts.append(f"PROGRAM INFORMATION ({program_id.upper()}):")
+                    for doc in target_overview:
+                        context_parts.append(f"  {doc['text']}")
+
+            if "course" in by_type:
+                context_parts.append("\nCORE COURSES:")
+                course_added = set()
+                for doc in by_type["course"]:
+                    metadata = doc.get("metadata", {})
+                    code = metadata.get("course_code", "")
+
+                    # Skip if already added
+                    if code in course_added:
+                        continue
+                    course_added.add(code)
+
+                    # Prioritize target program courses
+                    is_target = doc.get("program_id") == program_id
+                    marker = "[Target Program] " if is_target else ""
+
+                    name = metadata.get("course_name", "")
+                    credits = metadata.get("credits", "")
+                    context_parts.append(f"  • {marker}{code}: {name} ({credits} credits)")
+                    if metadata.get("skills"):
+                        context_parts.append(f"    Skills: {', '.join(metadata['skills'])}")
+
+            if "specialization" in by_type:
+                context_parts.append("\nSPECIALIZATIONS:")
+                for doc in by_type["specialization"]:
+                    context_parts.append(f"  • {doc['text']}")
+
+            if "prerequisites" in by_type:
+                context_parts.append(f"\nPREREQUISITES for {program_id.upper()}:")
+                # Only show target program prerequisites
+                target_prereqs = [d for d in by_type["prerequisites"] if d.get("program_id") == program_id]
+                for doc in target_prereqs:
+                    prereq_data = doc.get("metadata", {})
+                    context_parts.append(f"  • Bachelor's degree required")
+                    if "programming_courses" in prereq_data:
+                        context_parts.append(f"  • {prereq_data['programming_courses']}")
+                    if "math_requirement" in prereq_data:
+                        context_parts.append(f"  • {prereq_data['math_requirement']}")
+
+            context = "\n".join(context_parts)
+            logger.info(f"RAG retrieved {len(results)} documents ({len(primary_docs)} primary, {len(secondary_docs)} secondary), {len(context)} chars")
+
+            return context
+
+        except Exception as e:
+            logger.error(f"Error in RAG retrieval: {str(e)}")
+            return ""
+
+    def get_program_overview(self, program_id: str = "msit") -> str:
+        """Get overview of a specific program"""
+        try:
+            for program in self.knowledge_base.get("programs", []):
+                if program.get("id") == program_id:
+                    overview = program.get("overview", "")
+                    credits = program.get("total_credits", "")
+                    duration = program.get("duration_semester", "")
+
+                    return f"""
+{program.get('name', '')}
+{'=' * 50}
+Overview: {overview}
+Total Credits: {credits}
+Duration: {duration}
 """
-                return context
 
-        # Format search results
-        context = "Relevant Program Information:\n\n"
-        for i, result in enumerate(search_results[:top_k], 1):
-            result_type = result.get("type", "unknown")
+            return f"Program {program_id} not found."
+        except Exception as e:
+            logger.error(f"Error getting program overview: {str(e)}")
+            return ""
 
-            if result_type == "core_course":
-                context += f"{i}. Core Course: {result.get('code')} - {result.get('name')}\n"
-                context += f"   Credits: {result.get('credits')}\n"
-                if result.get('description'):
-                    context += f"   Description: {result.get('description')}\n"
+    def get_course_details(self, course_code: str, program_id: str = "msit") -> str:
+        """Get detailed information about a specific course"""
+        try:
+            for program in self.knowledge_base.get("programs", []):
+                if program.get("id") == program_id:
+                    for course in program.get("core_courses", []):
+                        if course.get("code") == course_code:
+                            details = f"""
+Course: {course.get('code')} - {course.get('name')}
+{'=' * 50}
+Credits: {course.get('credits')}
+Description: {course.get('description', '')}
+Skills: {', '.join(course.get('skills', []))}
+Difficulty: {course.get('difficulty', 'N/A')}
+Workload: {course.get('workload', 'N/A')}
+"""
+                            return details
 
-            elif result_type == "specialization":
-                context += f"{i}. Specialization: {result.get('name')} (9 credits total)\n"
-                courses = result.get('courses', [])
-                context += f"   Required courses:\n"
-                for course in courses:
-                    if isinstance(course, dict):
-                        # New format with course details
-                        context += f"   - {course.get('code')}: {course.get('name')} ({course.get('credits')} credits)\n"
-                    else:
-                        # Old format (just string)
-                        context += f"   - {course}\n"
+            return f"Course {course_code} not found in program {program_id}."
+        except Exception as e:
+            logger.error(f"Error getting course details: {str(e)}")
+            return ""
 
-            elif result_type == "specialization_course":
-                context += f"{i}. {result.get('specialization')} - {result.get('code')}: {result.get('name')}\n"
-                context += f"   Credits: {result.get('credits')}\n"
+    def get_specializations(self, program_id: str = "msit") -> str:
+        """Get available specializations for a program"""
+        try:
+            for program in self.knowledge_base.get("programs", []):
+                if program.get("id") == program_id:
+                    specs = program.get("specializations", [])
+                    if not specs:
+                        return f"No specializations available for {program.get('name', '')}"
 
-            elif result_type == "capstone":
-                context += f"{i}. Capstone Experience (Required - {result.get('credits')} credits total)\n"
-                courses = result.get('courses', [])
-                if isinstance(courses, list) and len(courses) > 0:
-                    if isinstance(courses[0], dict):
-                        # New format with course details
-                        context += f"   You must take TWO capstone courses:\n"
-                        for course in courses:
-                            context += f"   - {course.get('code')}: {course.get('name')} ({course.get('credits')} credits)\n"
-                    else:
-                        # Old format with just course names
-                        context += f"   Courses: {', '.join(courses)}\n"
-                context += f"   Total: 2 courses = 6 credits\n"
+                    result = f"Specializations for {program.get('name', '')}:\n"
+                    for spec in specs:
+                        result += f"\n• {spec.get('name', '')}\n"
+                        result += f"  Description: {spec.get('description', '')}\n"
+                        courses = spec.get("required_courses", [])
+                        if courses:
+                            result += f"  Required Courses: {', '.join(courses)}\n"
 
-            elif result_type == "overview":
-                context += f"{i}. Program Overview:\n"
-                context += f"   {result.get('content')}\n"
+                    return result
 
-            context += "\n"
-
-        return context
+            return f"Program {program_id} not found."
+        except Exception as e:
+            logger.error(f"Error getting specializations: {str(e)}")
+            return ""
 
 
-# Global RAG service instance
+# Singleton instance
 _rag_service = None
 
 
 def get_rag_service() -> RAGService:
-    """Get or create global RAG service instance"""
+    """Get or create the RAG service"""
     global _rag_service
     if _rag_service is None:
         _rag_service = RAGService()

@@ -230,63 +230,76 @@ class PDFExtractionService:
             ValueError: If LLM formatting fails
         """
         try:
-            print("\n📍 [PDF Processing] STEP 2: Using LLM to format extracted text")
+            print("\n📍 [PDF Processing] STEP 2: Using LLM (Google Gemini) to format extracted text")
 
             formatting_prompt = f"""
 You are an expert at parsing academic transcripts from universities.
+Use your vision and language understanding to extract COMPLETE and ACCURATE data.
 
 I have extracted raw text from an academic transcript PDF.
-Your job is to carefully analyze this text and extract ONLY the ACTUAL information that appears in the transcript.
+Your job is to carefully analyze this text and extract ALL information that appears in the transcript.
 
-CRITICAL: Extract EXACTLY what appears in the document. Do NOT infer, guess, or make up data.
-If information is not explicitly stated in the transcript, set it to null.
+CRITICAL INSTRUCTIONS:
+- Extract EXACTLY what appears in the document. Do NOT infer, guess, or make up data.
+- If information is not explicitly stated, set it to null
+- Be thorough: Extract EVERY course listed with ALL its details
+- Find and extract all grades, credits, and course codes accurately
 
 Return the data in this JSON format ONLY (no markdown code blocks, just pure JSON):
 {{
-    "student_name": "Full legal name as shown on transcript (or null if not found)",
-    "student_id": "Student ID number or A-ID (or null if not found)",
-    "gpa": null if not found,
+    "student_name": "Full legal name exactly as shown on transcript (or null if not found)",
+    "student_id": "Student ID number or A-ID exactly as shown (or null if not found)",
+    "gpa": numeric GPA value (e.g., 3.71) or null,
     "program_info": {{
-        "program_name": "Exact program name from transcript (e.g., 'MS in Information Technology', 'Master of Business Administration') or null",
-        "enrollment_date": "Date in YYYY-MM-DD format if explicitly stated, or null"
+        "program_name": "Exact program name from transcript (or null)",
+        "enrollment_date": "Date in YYYY-MM-DD format if stated, or null"
     }},
     "completed_courses": [
         {{
-            "course_code": "Exact course code from transcript (e.g., IT504, CS101)",
-            "course_name": "Exact course name from transcript",
+            "course_code": "Exact course code (e.g., MIS581, IT504, CS101)",
+            "course_name": "Exact course name/title",
             "credits": 3.0,
-            "grade": "Letter grade if shown (A, B, A-, B+, etc.) or null"
-        }}
+            "grade": "Grade earned (A, B, C, D, F, or with +/-, or null if not shown)"
+        }},
+        ...more courses...
     ],
     "current_courses": [
         {{
-            "course_code": "Course code",
-            "course_name": "Course name",
+            "course_code": "Exact course code",
+            "course_name": "Exact course name",
             "credits": 3.0
-        }}
+        }},
+        ...more courses...
     ]
 }}
 
-VALIDATION RULES:
-- GPA: Must be a decimal number between 0.0 and 4.0, OR null if not found
-  * Look for: "GPA:", "Cumulative GPA:", "Overall GPA:", "Grade Point Average:", "Current GPA:", "Term GPA:"
-  * Extract the numeric value only (e.g., if you see "GPA: 3.85 / 4.0", extract 3.85)
-  * Common formats: "3.85", "3.5", "2.75", etc.
-- Grades: Use only letter grades (A, B, C, D, F) with optional +/-, or null
-- Credits: Must be numeric, OR null if not specified
-- Course codes: MUST match the pattern in the transcript (e.g., "IT504", "CS101", "MBA502")
-- Course names: Use the EXACT name from the transcript
-- Dates: Use YYYY-MM-DD format ONLY
-- If any section has no data, use empty array []
+EXTRACTION GUIDELINES:
+1. GPA Extraction (CRITICAL - often clearly labeled):
+   - Look for: "GPA:", "Cumulative GPA:", "Overall GPA:", "Current GPA:", "GPA: X.XX / 4.0"
+   - Extract the numeric value only (3.71, 3.5, 2.75, etc.)
+   - Must be between 0.0 and 4.0
 
-STRICT RULES:
-1. Return ONLY the JSON, no explanations, no markdown, no code blocks
-2. All field values must be exact matches from the transcript
-3. Do NOT create fake courses or programs
-4. Do NOT try to be helpful by adding missing information
-5. Do NOT normalize or reformat data
-6. Return valid JSON that can be parsed
-7. PAY SPECIAL ATTENTION to GPA - it is critically important and often labeled clearly in transcripts
+2. Course Extraction (Find EVERY course):
+   - Look for course code patterns: All caps + numbers (MIS581, IT504, MBA502, CS101, etc.)
+   - For each course, find: code, name, credits, and grade (if shown)
+   - Include BOTH completed and current courses
+   - Extract grades exactly as shown (A+, A, A-, B+, B, B-, C+, C, C-, D+, D, D-, F, or numeric)
+   - Extract credits as numbers (3.0, 4.0, etc.)
+
+3. Student Info:
+   - Name: Full legal name as shown
+   - ID: Student ID or A-ID number
+   - Program: Exact program name (MS in Information Technology, MBA, etc.)
+   - Enrollment: Date if explicitly stated
+
+VALIDATION:
+- Return ONLY the JSON, no explanations or markdown
+- GPA must be null or a number between 0.0-4.0
+- All course codes must match the transcript exactly
+- All course names must match the transcript exactly
+- All grades must be valid letter grades (A-F with optional +/-)
+- Return valid JSON that can be parsed without errors
+- If no courses found, use empty array []
 
 Here is the COMPLETE raw transcript text to analyze:
 {raw_text}
@@ -384,14 +397,14 @@ Here is the COMPLETE raw transcript text to analyze:
         """
         Complete PDF processing pipeline:
         1. Extract text from PDF using Gemini Vision
-        2. Format and structure using LLM
+        2. Format and structure using LLM (Google Gemini)
         3. Store in shared context cache
 
         Args:
             pdf_base64: Base64 encoded PDF file
 
         Returns:
-            Extracted and parsed transcript data
+            Extracted and parsed transcript data with complete course details and grades
 
         Raises:
             ValueError: If processing fails
@@ -399,22 +412,22 @@ Here is the COMPLETE raw transcript text to analyze:
         try:
             print("\n" + "="*80)
             print("[PDF Processing] Starting complete PDF processing pipeline")
+            print("[PDF Processing] Using Google Gemini for accurate extraction of all transcript data")
             print("="*80)
 
-            # Step 1: Extract text from PDF
-            print("\n [PDF Processing] STEP 1: Extracting text from PDF using Gemini Vision API")
+            # Step 1: Extract text from PDF using Gemini Vision
+            print("\n [PDF Processing] STEP 1: Extracting text from PDF using Google Gemini Vision API")
             extracted_text = await self.extract_text_from_pdf(pdf_base64)
 
-            # Step 2A: Try fast REGEX extraction first
-            print("\n📍 [PDF Processing] STEP 2: Attempting fast extraction (regex → LLM fallback)")
-            transcript_data = self.format_extracted_text_with_regex(extracted_text)
-
-            # Step 2B: If regex didn't get enough data, use LLM for better accuracy
-            if transcript_data is None:
-                print("\n📍 [PDF Processing] STEP 2B: Regex extraction incomplete, using full LLM...")
-                transcript_data = self.format_extracted_text_with_llm(extracted_text)
-            else:
-                print("\n📍 [PDF Processing] STEP 2B: Skipping LLM (regex extraction was sufficient)")
+            # Step 2: Use Google Gemini LLM for comprehensive data extraction
+            # This ensures complete extraction of:
+            # - All courses (completed and current)
+            # - All grades for each course
+            # - GPA and student information
+            # - Credits for each course
+            print("\n [PDF Processing] STEP 2: Using Google Gemini LLM for comprehensive transcript parsing")
+            print("[PDF Processing] This will extract: student info, GPA, all courses, grades, credits")
+            transcript_data = self.format_extracted_text_with_llm(extracted_text)
 
             # Step 3: Store in shared context cache
             print("\n [PDF Processing] STEP 3: Storing in shared context cache for chat service")

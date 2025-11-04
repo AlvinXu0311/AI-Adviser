@@ -8,7 +8,7 @@
       "duration_semester": "6-12 months",
       "format": ["On-Campus", "Online"],
       "delivery": ["Full-time", "Part-time"],
-
+      "tags": ["information technology", "IT", "systems", "management", "technology leadership"],
       "overview": "WPI's MS in Information Technology is a 33-credit graduate degree grounded in a technology-focused university that prepares students for IT leadership roles.",
 
       "prerequisites": {
@@ -26,7 +26,12 @@
           "credits": 3,
           "semester": "Any",
           "required": true,
-          "description": "Covers policy and strategic planning in IT and analytics"
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["strategic planning", "policy", "IT management", "analytics"],
+          "description": "Covers policy and strategic planning in IT and analytics",
+          "outcomes": ["Understand IT strategy", "Develop IT policies", "Analyze business analytics"]
         },
         {
           "code": "MIS584",
@@ -34,7 +39,12 @@
           "credits": 3,
           "semester": "Any",
           "required": true,
-          "description": "Explores business intelligence systems and practices"
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["business intelligence", "data analysis", "reporting", "dashboards"],
+          "description": "Explores business intelligence systems and practices",
+          "outcomes": ["Create BI solutions", "Build dashboards", "Analyze business data"]
         },
         {
           "code": "MIS502",
@@ -42,7 +52,13 @@
           "credits": 3,
           "semester": "Any",
           "required": true,
-          "description": "Focuses on data management principles for analytics applications"
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["data management", "databases", "data architecture", "SQL"],
+          "description": "Focuses on data management principles for analytics applications",
+          "outcomes": ["Manage data infrastructure", "Design databases", "Optimize data systems"],
+          "prerequisites": []
         }
       ],
 
@@ -50,28 +66,39 @@
         {
           "id": "ai_business",
           "name": "Artificial Intelligence in Business",
+          "tags": ["AI", "machine learning", "ethics", "business applications"],
           "description": "Focus on AI applications in business contexts",
+          "difficulty": "Advanced",
           "courses": [
             {
               "code": "MIS587",
               "name": "Business Applications in Machine Learning",
               "credits": 3,
               "required": true,
-              "description": "Machine learning techniques for business applications"
+              "difficulty": "Advanced",
+              "workload": "High",
+              "skills": ["machine learning", "Python", "AI models", "business applications"],
+              "description": "Machine learning techniques for business applications",
+              "outcomes": ["Build ML models", "Apply AI to business", "Evaluate ML systems"]
             },
             {
               "code": "MIS520_OR_MIS581",
               "name": "AI and Ethics OR Policy and Strategy",
               "credits": 3,
               "required": true,
+              "difficulty": "Intermediate",
               "options": [
                 {
                   "code": "MIS520",
-                  "name": "Artificial Intelligence and its Ethical Applications in Business"
+                  "name": "Artificial Intelligence and its Ethical Applications in Business",
+                  "skills": ["AI ethics", "responsible AI", "governance"],
+                  "description": "Ethics in AI and responsible AI deployment"
                 },
                 {
                   "code": "MIS581",
-                  "name": "Policy and Strategy for Information Technology, Artificial Intelligence, and Analytics"
+                  "name": "Policy and Strategy for Information Technology, Artificial Intelligence, and Analytics",
+                  "skills": ["IT policy", "strategy", "AI governance"],
+                  "description": "Strategic planning for AI initiatives"
                 }
               ],
               "description": "Choose between AI ethics or IT policy and strategy"
@@ -81,18 +108,22 @@
               "name": "Marketing or Process Optimization Elective",
               "credits": 3,
               "required": true,
+              "difficulty": "Intermediate",
               "options": [
                 {
                   "code": "MKT562",
-                  "name": "Marketing Research"
+                  "name": "Marketing Research",
+                  "skills": ["market research", "analytics", "consumer insights"]
                 },
                 {
                   "code": "MKT568",
-                  "name": "Marketing Analytics"
+                  "name": "Marketing Analytics",
+                  "skills": ["marketing analytics", "customer analytics", "segmentation"]
                 },
                 {
                   "code": "OIE552",
-                  "name": "Modeling and Optimizing Processes"
+                  "name": "Modeling and Optimizing Processes",
+                  "skills": ["process optimization", "modeling", "lean six sigma"]
                 }
               ],
               "description": "Choose one elective from marketing research, analytics, or process optimization"
@@ -102,63 +133,90 @@
         {
           "id": "is_design",
           "name": "Information Systems Design",
+          "tags": ["systems design", "security", "database", "UX", "application development"],
           "description": "Focus on designing and securing information systems",
+          "difficulty": "Advanced",
           "courses": [
             {
               "code": "MIS571",
               "name": "Database Applications Design and Development",
               "credits": 3,
               "required": true,
-              "description": "Database design and application development"
+              "difficulty": "Advanced",
+              "workload": "High",
+              "skills": ["database design", "application development", "SQL", "architecture"],
+              "description": "Database design and application development",
+              "outcomes": ["Design databases", "Develop applications", "Optimize databases"]
             },
             {
               "code": "MIS582",
               "name": "Information Security Management",
               "credits": 3,
               "required": true,
-              "description": "Information security principles and management"
+              "difficulty": "Advanced",
+              "workload": "Moderate",
+              "skills": ["security", "risk management", "compliance", "cyber security"],
+              "description": "Information security principles and management",
+              "outcomes": ["Manage security", "Assess risks", "Implement security policies"]
             },
             {
               "code": "MIS585",
               "name": "User Experience Design",
               "credits": 3,
               "required": true,
-              "description": "UX design principles and practices"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["UX design", "usability", "design thinking", "user research"],
+              "description": "UX design principles and practices",
+              "outcomes": ["Design user interfaces", "Conduct UX research", "Improve usability"]
             }
           ]
         },
         {
           "id": "data_analytics",
           "name": "Data Analytics",
+          "tags": ["data analytics", "machine learning", "marketing analytics", "insights"],
           "description": "Focus on data analytics and machine learning",
+          "difficulty": "Advanced",
           "courses": [
             {
               "code": "MIS587",
               "name": "Business Applications in Machine Learning",
               "credits": 3,
               "required": true,
-              "description": "Machine learning for business analytics"
+              "difficulty": "Advanced",
+              "workload": "High",
+              "skills": ["machine learning", "Python", "predictive modeling", "analytics"],
+              "description": "Machine learning for business analytics",
+              "outcomes": ["Build analytics models", "Predict outcomes", "Extract insights"]
             },
             {
               "code": "MKT568",
               "name": "Marketing Analytics",
               "credits": 3,
               "required": true,
-              "description": "Analytics applied to marketing problems"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["marketing analytics", "customer analytics", "campaign analysis"],
+              "description": "Analytics applied to marketing problems",
+              "outcomes": ["Analyze campaigns", "Segment customers", "Measure marketing ROI"]
             },
             {
               "code": "MKT_ELECTIVE",
               "name": "Digital Marketing OR Marketing Research",
               "credits": 3,
               "required": true,
+              "difficulty": "Intermediate",
               "options": [
                 {
                   "code": "MKT565",
-                  "name": "Digital Marketing"
+                  "name": "Digital Marketing",
+                  "skills": ["digital marketing", "social media", "online campaigns"]
                 },
                 {
                   "code": "MKT562",
-                  "name": "Marketing Research"
+                  "name": "Marketing Research",
+                  "skills": ["research methods", "data collection", "analysis"]
                 }
               ],
               "description": "Choose between digital marketing or marketing research"
@@ -168,32 +226,42 @@
         {
           "id": "digital_transformation",
           "name": "Digital Transformation",
+          "tags": ["digital transformation", "innovation", "operations", "change management", "leadership"],
           "description": "Focus on innovation and organizational transformation",
+          "difficulty": "Advanced",
           "courses": [
             {
               "code": "MIS500",
               "name": "Innovation with Information Systems",
               "credits": 3,
               "required": true,
-              "description": "Innovation strategies with information systems"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["innovation", "technology strategy", "digital transformation"],
+              "description": "Innovation strategies with information systems",
+              "outcomes": ["Drive innovation", "Plan digital transformation", "Implement change"]
             },
             {
               "code": "OPS_ELECTIVE",
               "name": "Operations Management Elective",
               "credits": 3,
               "required": true,
+              "difficulty": "Intermediate",
               "options": [
                 {
                   "code": "OIE501",
-                  "name": "Operations Management"
+                  "name": "Operations Management",
+                  "skills": ["operations", "process management", "efficiency"]
                 },
                 {
                   "code": "OIE544",
-                  "name": "Supply Chain Analysis and Design"
+                  "name": "Supply Chain Analysis and Design",
+                  "skills": ["supply chain", "logistics", "optimization"]
                 },
                 {
                   "code": "OIE558",
-                  "name": "Designing and Managing Lean Six Sigma Processes"
+                  "name": "Designing and Managing Lean Six Sigma Processes",
+                  "skills": ["lean", "six sigma", "process improvement"]
                 }
               ],
               "description": "Choose one operations management course"
@@ -203,18 +271,22 @@
               "name": "Project Management or Leadership Elective",
               "credits": 3,
               "required": true,
+              "difficulty": "Intermediate",
               "options": [
                 {
                   "code": "MIS576",
-                  "name": "Project Management"
+                  "name": "Project Management",
+                  "skills": ["project management", "planning", "execution", "leadership"]
                 },
                 {
                   "code": "OBC533",
-                  "name": "Negotiations"
+                  "name": "Negotiations",
+                  "skills": ["negotiation", "communication", "stakeholder management"]
                 },
                 {
                   "code": "OBC537",
-                  "name": "Leading Change"
+                  "name": "Leading Change",
+                  "skills": ["change management", "leadership", "organizational behavior"]
                 }
               ],
               "description": "Choose one project management or leadership course"
@@ -224,28 +296,42 @@
         {
           "id": "ux_user_experience",
           "name": "IT User Experience",
+          "tags": ["UX", "user experience", "user research", "design", "usability", "consumer behavior"],
           "description": "Focus on user experience design and research",
+          "difficulty": "Intermediate",
           "courses": [
             {
               "code": "MIS583",
               "name": "User Experience Applications",
               "credits": 3,
               "required": true,
-              "description": "Practical UX applications"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["UX design", "prototyping", "usability testing", "design tools"],
+              "description": "Practical UX applications",
+              "outcomes": ["Create UX designs", "Build prototypes", "Test usability"]
             },
             {
               "code": "MIS586",
               "name": "User Experience Methods",
               "credits": 3,
               "required": true,
-              "description": "UX research methods and techniques"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["user research", "usability methods", "analytics", "data analysis"],
+              "description": "UX research methods and techniques",
+              "outcomes": ["Conduct user research", "Analyze UX data", "Improve designs"]
             },
             {
               "code": "MKT561",
               "name": "Consumer Behavior and Analytics",
               "credits": 3,
               "required": true,
-              "description": "Understanding consumer behavior through analytics"
+              "difficulty": "Intermediate",
+              "workload": "Moderate",
+              "skills": ["consumer behavior", "psychology", "analytics", "insights"],
+              "description": "Understanding consumer behavior through analytics",
+              "outcomes": ["Analyze consumer behavior", "Create user personas", "Drive engagement"]
             }
           ]
         }
@@ -263,7 +349,11 @@
             "credits": 3,
             "required": true,
             "order": 1,
-            "description": "Team dynamics and organizational innovation"
+            "difficulty": "Advanced",
+            "workload": "High",
+            "skills": ["teamwork", "leadership", "innovation", "organization"],
+            "description": "Team dynamics and organizational innovation",
+            "outcomes": ["Lead teams", "Foster innovation", "Manage change"]
           },
           {
             "code": "MIS573",
@@ -271,7 +361,11 @@
             "credits": 3,
             "required": true,
             "order": 2,
-            "description": "Complete system design and development capstone project"
+            "difficulty": "Advanced",
+            "workload": "High",
+            "skills": ["system design", "development", "architecture", "project management"],
+            "description": "Complete system design and development capstone project",
+            "outcomes": ["Design systems", "Lead projects", "Deliver solutions"]
           }
         ]
       },
@@ -301,6 +395,387 @@
         "course_selection": "Many specialization courses have options - you choose one course from the listed alternatives",
         "capstone_timing": "Capstone courses are typically taken near the end of the program"
       }
+    },
+    {
+      "id": "msba",
+      "name": "MS in Business Analytics",
+      "degree_type": "Master's",
+      "total_credits": 33,
+      "duration_semester": "6-12 months",
+      "format": ["On-Campus", "Online"],
+      "delivery": ["Full-time", "Part-time"],
+      "tags": ["business analytics", "data science", "analytics", "business intelligence", "machine learning"],
+      "overview": "WPI's MS in Business Analytics prepares students to leverage data and analytics to drive business decisions and strategy.",
+
+      "prerequisites": {
+        "bachelor_degree": "Required from accredited university",
+        "programming_courses": "At least one prior college-level programming course recommended",
+        "math_requirement": "Calculus and statistics recommended",
+        "gpa_minimum": 3.0,
+        "notes": "Prerequisites may be waived with relevant work experience"
+      },
+
+      "core_courses": [
+        {
+          "code": "MIS502",
+          "name": "Data Management for Analytics",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["data management", "databases", "SQL", "data architecture"],
+          "description": "Data management and database fundamentals for analytics",
+          "outcomes": ["Manage data pipelines", "Design data systems", "Optimize queries"]
+        },
+        {
+          "code": "MIS587",
+          "name": "Business Applications in Machine Learning",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Advanced",
+          "workload": "High",
+          "format": ["In-person", "Online"],
+          "skills": ["machine learning", "Python", "predictive modeling", "algorithms"],
+          "description": "Machine learning techniques and business applications",
+          "outcomes": ["Build ML models", "Evaluate models", "Deploy solutions"]
+        },
+        {
+          "code": "MIS584",
+          "name": "Business Intelligence",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["business intelligence", "dashboards", "reporting", "visualization"],
+          "description": "Business intelligence systems and visualization",
+          "outcomes": ["Create dashboards", "Build reports", "Visualize data"]
+        }
+      ],
+
+      "specializations": [
+        {
+          "id": "predictive_analytics",
+          "name": "Predictive Analytics",
+          "tags": ["predictive analytics", "forecasting", "modeling", "machine learning"],
+          "description": "Focus on predictive modeling and forecasting",
+          "difficulty": "Advanced",
+          "courses": [
+            {
+              "code": "MIS591",
+              "name": "Advanced Predictive Analytics",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["predictive modeling", "forecasting", "time series analysis"]
+            },
+            {
+              "code": "MIS592",
+              "name": "Text Analytics and NLP",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["NLP", "text mining", "sentiment analysis"]
+            },
+            {
+              "code": "MIS593",
+              "name": "Advanced Machine Learning",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["deep learning", "neural networks", "advanced algorithms"]
+            }
+          ]
+        },
+        {
+          "id": "marketing_analytics",
+          "name": "Marketing Analytics",
+          "tags": ["marketing analytics", "customer analytics", "segmentation", "campaigns"],
+          "description": "Focus on analytics for marketing and customer insights",
+          "difficulty": "Intermediate",
+          "courses": [
+            {
+              "code": "MKT568",
+              "name": "Marketing Analytics",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["marketing analytics", "campaign analysis", "ROI measurement"]
+            },
+            {
+              "code": "MKT565",
+              "name": "Digital Marketing",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["digital marketing", "social media analytics", "online measurement"]
+            },
+            {
+              "code": "MKT562",
+              "name": "Marketing Research",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["market research", "survey design", "consumer insights"]
+            }
+          ]
+        }
+      ],
+
+      "capstone": {
+        "required": true,
+        "credits": 6,
+        "total_courses": 2,
+        "description": "Complete a capstone project applying analytics to real business problems",
+        "courses": [
+          {
+            "code": "MIS598",
+            "name": "Analytics Capstone Project",
+            "credits": 6,
+            "required": true,
+            "difficulty": "Advanced",
+            "workload": "High",
+            "skills": ["project management", "analytics implementation", "communication"]
+          }
+        ]
+      },
+
+      "program_structure": {
+        "total_credits": 33,
+        "breakdown": {
+          "core_courses": 9,
+          "specializations": 18,
+          "capstone": 6
+        },
+        "notes": "Choose 2 specializations from Predictive Analytics, Marketing Analytics, or other available options"
+      }
+    },
+    {
+      "id": "msm",
+      "name": "MS in Management",
+      "degree_type": "Master's",
+      "total_credits": 33,
+      "duration_semester": "6-12 months",
+      "format": ["On-Campus", "Online"],
+      "delivery": ["Full-time", "Part-time"],
+      "tags": ["management", "leadership", "business", "strategy", "organizational behavior"],
+      "overview": "WPI's MS in Management prepares students for leadership roles with focus on strategy, operations, and organizational excellence.",
+
+      "prerequisites": {
+        "bachelor_degree": "Required from accredited university",
+        "work_experience": "Minimum 2 years professional experience preferred",
+        "gpa_minimum": 3.0,
+        "notes": "Program accepts candidates from diverse academic backgrounds"
+      },
+
+      "core_courses": [
+        {
+          "code": "OBC501",
+          "name": "Organizational Behavior and Leadership",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["leadership", "organizational behavior", "team dynamics"],
+          "description": "Fundamentals of organizational behavior and leadership",
+          "outcomes": ["Lead effectively", "Manage teams", "Drive performance"]
+        },
+        {
+          "code": "MIS581",
+          "name": "Strategic Management",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["strategy", "strategic planning", "competitive analysis"],
+          "description": "Strategic planning and competitive strategy",
+          "outcomes": ["Develop strategy", "Analyze competition", "Plan initiatives"]
+        },
+        {
+          "code": "OIE501",
+          "name": "Operations and Process Management",
+          "credits": 3,
+          "semester": "Any",
+          "required": true,
+          "difficulty": "Intermediate",
+          "workload": "Moderate",
+          "format": ["In-person", "Online"],
+          "skills": ["operations", "process management", "optimization"],
+          "description": "Operations management and process optimization",
+          "outcomes": ["Optimize operations", "Improve processes", "Enhance efficiency"]
+        }
+      ],
+
+      "specializations": [
+        {
+          "id": "strategic_leadership",
+          "name": "Strategic Leadership",
+          "tags": ["leadership", "strategy", "change management", "organizational design"],
+          "description": "Focus on strategic leadership and organizational change",
+          "difficulty": "Advanced",
+          "courses": [
+            {
+              "code": "OBC537",
+              "name": "Leading Change",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["change management", "leadership", "transformation"]
+            },
+            {
+              "code": "OBC533",
+              "name": "Negotiations and Influence",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["negotiation", "influence", "stakeholder management"]
+            },
+            {
+              "code": "OBC505",
+              "name": "Teaming and Organizing for Innovation",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["teamwork", "innovation", "organization design"]
+            }
+          ]
+        },
+        {
+          "id": "operations_management",
+          "name": "Operations Management",
+          "tags": ["operations", "supply chain", "lean", "process improvement"],
+          "description": "Focus on operations strategy and process improvement",
+          "difficulty": "Intermediate",
+          "courses": [
+            {
+              "code": "OIE544",
+              "name": "Supply Chain Analysis and Design",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["supply chain", "logistics", "optimization"]
+            },
+            {
+              "code": "OIE552",
+              "name": "Modeling and Optimizing Processes",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Intermediate",
+              "skills": ["process modeling", "optimization", "lean six sigma"]
+            },
+            {
+              "code": "OIE558",
+              "name": "Designing and Managing Lean Six Sigma Processes",
+              "credits": 3,
+              "required": true,
+              "difficulty": "Advanced",
+              "skills": ["lean", "six sigma", "continuous improvement"]
+            }
+          ]
+        }
+      ],
+
+      "capstone": {
+        "required": true,
+        "credits": 6,
+        "total_courses": 1,
+        "description": "Complete a capstone consulting project for a real organization",
+        "courses": [
+          {
+            "code": "OBC599",
+            "name": "Management Consulting Capstone",
+            "credits": 6,
+            "required": true,
+            "difficulty": "Advanced",
+            "workload": "High",
+            "skills": ["consulting", "analysis", "recommendations", "communication"]
+          }
+        ]
+      },
+
+      "program_structure": {
+        "total_credits": 33,
+        "breakdown": {
+          "core_courses": 9,
+          "specializations": 18,
+          "capstone": 6
+        },
+        "notes": "Choose 2 specializations to tailor your management education"
+      }
     }
+  ],
+
+  "faqs": [
+    {
+      "question": "What programs does WPI offer for graduate students?",
+      "answer": "WPI offers three main Master's programs: MS in Information Technology (MSIT), MS in Business Analytics (MSBA), and MS in Management (MSM). All are 33 credits and can be completed in 6-12 months.",
+      "tags": ["programs", "overview"]
+    },
+    {
+      "question": "How many credits are required to graduate?",
+      "answer": "All graduate programs require 33 total credits: 9 credits in core courses, 18 credits in two specializations, and 6 credits in capstone courses.",
+      "tags": ["credits", "requirements", "graduation"]
+    },
+    {
+      "question": "Can I choose my own specializations?",
+      "answer": "Yes, you must choose TWO different specializations from the available options. Each specialization consists of 3 courses worth 9 credits total (6 credits from your 2 specializations = 18 credits).",
+      "tags": ["specializations", "choice", "flexibility"]
+    },
+    {
+      "question": "How long do I have to complete the program?",
+      "answer": "The typical duration is 6-12 months depending on your pace. You can study full-time or part-time to fit your schedule.",
+      "tags": ["duration", "timeline", "pace"]
+    },
+    {
+      "question": "Are the programs available online?",
+      "answer": "Yes, all programs offer online and on-campus options. Most courses are available in both formats.",
+      "tags": ["online", "format", "delivery"]
+    },
+    {
+      "question": "What are the admission prerequisites?",
+      "answer": "Basic requirements include a bachelor's degree from an accredited university and a minimum GPA of 3.0. Specific programs may have additional requirements like programming courses or work experience.",
+      "tags": ["admission", "prerequisites", "requirements"]
+    },
+    {
+      "question": "Do I need work experience to apply?",
+      "answer": "Work experience is not strictly required for MSIT or MSBA. However, MSM prefers minimum 2 years professional experience. All programs accept candidates from diverse backgrounds.",
+      "tags": ["experience", "admission", "background"]
+    },
+    {
+      "question": "What is the capstone requirement?",
+      "answer": "All programs require 6 credits of capstone coursework. This typically involves a real-world project or consulting engagement where you apply what you've learned.",
+      "tags": ["capstone", "project", "requirements"]
+    },
+    {
+      "question": "Can I take courses part-time?",
+      "answer": "Yes, all programs support part-time enrollment. You can adjust your course load to balance work and studies.",
+      "tags": ["part-time", "flexibility", "schedule"]
+    },
+    {
+      "question": "What language requirements apply?",
+      "answer": "International students must demonstrate English proficiency through TOEFL (90 iBT or 8.5 Essentials), IELTS (7.0 overall, 6.5 minimum per section), or Duolingo (115).",
+      "tags": ["international", "language", "English proficiency"]
+    }
+  ],
+
+  "common_questions": [
+    "What courses should I take first?",
+    "How do I choose specializations?",
+    "What is the difference between MSIT and MSBA?",
+    "Can I switch programs after starting?",
+    "What is the course load per semester?",
+    "Are there elective options?",
+    "What is the tuition cost?",
+    "Are scholarships available?",
+    "What career paths can I pursue?",
+    "How do I apply?"
   ]
 }

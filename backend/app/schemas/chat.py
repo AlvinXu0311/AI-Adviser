@@ -53,11 +53,16 @@ class ChatRequest(BaseModel):
         None,
         description="Optional student transcript context for personalized responses"
     )
+    session_id: Optional[str] = Field(
+        None,
+        description="Optional session ID for conversation memory - generates one if not provided"
+    )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "What courses should I take next?",
+                "session_id": "abc123def456",
                 "transcript_context": {
                     "student_name": "John Doe",
                     "gpa": 3.85,

@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Start script for WPI Business School Chatbot
-# Starts both frontend and backend services simultaneously
+# Starts both frontend and backend services with LangChain agentic RAG
+# Uses ReAct pattern for autonomous agent reasoning
 
 echo "================================"
 echo "WPI Chatbot - Start Services"
+echo "LangChain Agentic RAG Enabled"
 echo "================================"
 echo ""
 
@@ -114,12 +116,24 @@ fi
 # Check for .env file
 if [ ! -f ".env" ]; then
     echo ""
-    echo -e "${YELLOW}⚠ Warning: .env file not found${NC}"
+    echo -e "${YELLOW}Warning: .env file not found${NC}"
     echo "  Copy .env.example to .env and set GOOGLE_API_KEY:"
     echo "  cp .env.example .env"
     echo "  # Edit .env and add your Google Gemini API key"
     echo ""
 fi
+
+# Verify LangChain dependencies
+echo "Checking LangChain dependencies..."
+if ! ./venv/bin/python -c "import langchain" 2>/dev/null; then
+    echo "Installing LangChain framework..."
+    if ! ./venv/bin/pip install langchain langchain-google-genai langchain-community chromadb sentence-transformers rank-bm25; then
+        echo -e "${YELLOW}Warning: Some LangChain dependencies may not have installed correctly${NC}"
+    fi
+fi
+
+echo -e "${GREEN}LangChain framework ready${NC}"
+echo ""
 
 # Start backend in background
 ./venv/bin/python -m uvicorn app.main:app --reload --port 8000 > "../backend.log" 2>&1 &
@@ -170,24 +184,30 @@ cd ..
 
 echo ""
 echo "================================"
-echo -e "${GREEN}✓ Services Started Successfully${NC}"
+echo -e "${GREEN}Services Started Successfully${NC}"
 echo "================================"
 echo ""
-echo "📍 Access Points:"
+echo "Access Points:"
 echo "  Frontend:  http://localhost:4200"
 echo "  Backend:   http://localhost:8000"
 echo "  API Docs:  http://localhost:8000/docs"
 echo "  Health:    http://localhost:8000/api/health"
 echo ""
-echo "📝 Logs:"
+echo "LangChain Agentic RAG:"
+echo "  Adviser Agent:       Autonomous reasoning with ReAct pattern"
+echo "  Hybrid RAG:          BM25 + Semantic search with ensemble"
+echo "  Tools:               RAG Search, Student Context, Complexity Analysis"
+echo "  Vector Database:     Chroma (for embeddings)"
+echo ""
+echo "Logs:"
 echo "  Backend log:   tail -f backend.log"
 echo "  Frontend log:  tail -f frontend.log"
 echo ""
-echo "🛑 To stop services:"
+echo "To stop services:"
 echo "  Press Ctrl+C (stops both)"
 echo "  Or run: ./stop.sh"
 echo ""
-echo "✅ Backend is ready! Check logs above for any errors."
+echo "Backend is ready! Check logs above for any errors."
 echo ""
 
 # Keep script running and show logs

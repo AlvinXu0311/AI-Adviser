@@ -1,18 +1,18 @@
 # WPI Business School Digital Library Chatbot
 
-Interactive chatbot platform for academic advising with PDF transcript upload, Chain of Thought reasoning, and RAG-powered responses.
+Interactive chatbot platform for academic advising with PDF transcript upload, agentic RAG, and LangChain-powered responses.
 
 ## Project Overview
 
 This system provides 24/7 support to WPI Business School students by offering:
-- Interactive chat for academic queries with Chain of Thought reasoning
+- Interactive chat for academic queries using LangChain agentic RAG
 - PDF transcript upload with automatic extraction using Gemini Vision API
-- RAG (Retrieval-Augmented Generation) system for accurate program information
-- LLM-powered responses using Google Gemini 2.5 Flash with native thinking mode
+- Agentic RAG system with ReAct pattern for autonomous knowledge retrieval
+- LLM-powered responses using Google Gemini 2.5 Flash via LangChain
 - Context-aware recommendations based on student transcript
 - Fully responsive Material Design UI
 - Comprehensive test coverage (98+ tests)
-- Rule-based system for common queries
+- Hybrid retrieval combining BM25 and semantic search with embeddings
 
 ## Quick Start
 
@@ -75,23 +75,27 @@ MIS520/
 │   ├── package.json                   # Dependencies
 │   └── README.md                       # Frontend documentation
 │
-├── backend/                            # FastAPI application
+├── backend/                            # FastAPI application with LangChain
 │   ├── app/
+│   │   ├── agents/                    # LangChain agents (NEW)
+│   │   │   ├── adviser_agent.py      # Academic adviser ReAct agent
+│   │   │   ├── tools.py              # Agent tools (RAG, context, analysis)
+│   │   │   └── __init__.py
+│   │   ├── chains/                    # LangChain chains (NEW)
+│   │   │   ├── rag_chain.py          # Hybrid RAG with BM25 + semantic search
+│   │   │   ├── chat_chain.py         # Context-aware chat chain
+│   │   │   └── __init__.py
 │   │   ├── api/                       # REST endpoints (chat, transcript)
 │   │   ├── services/                  # Business logic
-│   │   │   ├── llm_service.py        # LLM with Chain of Thought
+│   │   │   ├── llm_service.py        # LLM utilities
 │   │   │   ├── rag_service.py        # RAG retrieval system
 │   │   │   ├── context_manager.py    # Student context caching
 │   │   │   └── pdf_extraction_service.py
 │   │   ├── schemas/                   # Data validation
-│   │   ├── rules/                     # Rule-based response system ✨NEW
-│   │   │   ├── data/                 # Rule patterns and responses
-│   │   │   ├── templates/            # Response templates
-│   │   │   └── patterns/             # Pattern matching rules
 │   │   ├── knowledge_base/           # RAG knowledge base (programs.json)
 │   │   └── utils/                     # Error handling
-│   ├── tests/                         # 45 test cases
-│   ├── requirements.txt               # Python dependencies
+│   ├── tests/                         # 45+ test cases
+│   ├── requirements.txt               # Python dependencies (including LangChain)
 │   ├── .env.example                   # Environment template
 │   └── pytest.ini                     # Test configuration
 │
@@ -154,17 +158,17 @@ MIS520/
 
 **API Endpoints**
 
-1. **POST /api/chat** - Chat with context and Chain of Thought
+1. **POST /api/chat** - Chat with LangChain agentic RAG
    - Accepts: `{ message, transcriptContext? }`
-   - Returns: `{ response }`
-   - Uses Gemini 2.5 Flash with native thinking mode
-   - Automatic query complexity assessment
-   - Dynamic thinking budget allocation
+   - Returns: `{ response, intent, response_source }`
+   - Uses LangChain ReAct agent for autonomous reasoning
+   - Hybrid RAG retrieval (BM25 + semantic search)
+   - Tool-based knowledge lookup and context analysis
 
 2. **POST /api/extract-transcript** - Extract from PDF
    - Accepts: `{ pdf_base64 }`
    - Returns: `{ success, data, error? }`
-   - Uses Gemini Vision API for extraction
+   - Uses Gemini Vision API for OCR extraction
 
 3. **GET /api/health** - Health check
    - Returns: `{ status, service, version }`
@@ -172,16 +176,37 @@ MIS520/
 4. **GET /** - Root endpoint
    - Returns: `{ message }`
 
+**LangChain Architecture**
+
+Agents (Autonomous Reasoning):
+- **AdviserAgent**: ReAct pattern for multi-step reasoning
+  - Autonomous tool invocation for knowledge retrieval
+  - Step-by-step reasoning about student queries
+  - Integration of multiple information sources
+  - Intelligent decision-making with tool use
+
+Chains (Processing Pipelines):
+- **RAGChain**: Hybrid retrieval with ensemble methods
+  - BM25 retrieval for keyword matching (50% weight)
+  - Semantic search with embeddings (50% weight)
+  - Ensemble retriever combining both approaches
+  - Relevance scoring and confidence calculation
+
+- **ChatChain**: Context-aware conversation
+  - Student transcript context integration
+  - Conversation history management
+  - CoT-inspired reasoning patterns
+  - System prompt customization
+
+Tools (Agent Capabilities):
+- **RAG Search**: Query program knowledge base
+- **Student Context**: Access transcript information
+- **Complexity Assessment**: Analyze query requirements
+
 **Core Services**
 
-- **LLMService**: Chain of Thought reasoning with Gemini 2.5 Flash
-  - Automatic query complexity assessment (simple/medium/complex)
-  - Dynamic thinking budget allocation (1K-10K tokens)
-  - Native thinking mode with google-genai API
-  - 15-25% accuracy improvement on complex queries
-
 - **RAGService**: Retrieval-Augmented Generation
-  - Keyword-based search with semantic potential
+  - BM25 scoring for relevance ranking
   - Program information retrieval from knowledge base
   - Context generation for LLM prompts
   - Top-K retrieval with relevance filtering
@@ -195,11 +220,6 @@ MIS520/
   - 60-minute TTL for transcript data
   - Academic progress evaluation
   - Course progression tracking
-
-- **Rule-based Response System**: Fast responses for common queries
-  - Pattern matching for greetings, farewells, help
-  - Reduces LLM API costs
-  - <1ms response time for matched patterns
 
 **Data Models**
 
@@ -231,18 +251,25 @@ MIS520/
 
 **Technology Stack**
 - FastAPI (modern, fast Python framework)
+- LangChain (agent orchestration and chain management)
+- LangChain Google GenAI (Gemini integration)
+- Chroma (vector database for semantic search)
+- Sentence Transformers (embeddings model: all-MiniLM-L6-v2)
+- Rank-BM25 (keyword-based relevance scoring)
 - Pydantic for data validation
-- Google Generative AI SDK (google-genai for native thinking)
+- Google Generative AI SDK (vision API for PDF extraction)
 - SQLAlchemy for database models
 - Pytest for testing with 45+ tests
 - Python 3.8+
 
 **Advanced Features**
-- Chain of Thought (CoT) reasoning with thinking budgets
+- Agentic RAG with ReAct pattern (reasoning and acting)
+- Hybrid retrieval combining BM25 and semantic search
+- Autonomous agent tool invocation for knowledge queries
 - RAG (Retrieval-Augmented Generation) for program information
-- Rule-based system for fast common query responses
 - Student context caching with 60min TTL
 - Academic progress evaluation and tracking
+- Multi-tool agent reasoning with fallback mechanisms
 
 ## Testing
 
@@ -268,18 +295,22 @@ cd backend && pytest --cov=app --cov-report=html
 
 Create `backend/.env`:
 ```bash
-# Required
+# Required - Google Gemini API Key for LangChain integration
 GOOGLE_API_KEY=your_google_gemini_api_key_here
 
-# Optional - Chain of Thought Configuration
-THINKING_ENABLED=true
-THINKING_BUDGET_SIMPLE=1000
-THINKING_BUDGET_DEFAULT=5000
-THINKING_BUDGET_COMPLEX=10000
+# LangChain Configuration
+# Enable/disable agentic RAG features
+LANGCHAIN_ENABLED=true
+LANGCHAIN_VERBOSE=false
 
-# Optional - LLM Provider
-LLM_PROVIDER=google   # Options: google, llama
-# LLAMA_API_URL=http://localhost:11434/api  # If using Ollama
+# RAG Configuration
+RAG_HYBRID_SEARCH=true        # Enable hybrid BM25 + semantic search
+RAG_BM25_WEIGHT=0.5           # BM25 weight in ensemble (0.0-1.0)
+RAG_SEMANTIC_WEIGHT=0.5       # Semantic weight in ensemble (0.0-1.0)
+RAG_TOP_K=5                   # Number of top results to retrieve
+
+# Vector Database
+CHROMA_PERSIST_DIR=/tmp/chroma_db
 
 # Server Configuration
 FRONTEND_URL=http://localhost:4200
@@ -430,60 +461,55 @@ docker run -p 8000:8000 -e GOOGLE_API_KEY=xxx wpi-chatbot:latest
 2. **BACKEND_TESTING_GUIDE.md** - Comprehensive backend testing guide
 3. **FRONTEND_TESTING_GUIDE.md** - Comprehensive frontend testing guide
 4. **QUICK_TEST_GUIDE.md** - Quick reference for running tests
-5. **IMPLEMENTATION_SUMMARY.md** - Complete implementation details (31 files, 5200+ lines)
+5. **IMPLEMENTATION_SUMMARY.md** - Complete implementation details
 6. **API_CONTRACT.md** - API specifications with examples
 7. **BACKEND_ROADMAP.md** - Backend architecture and implementation guide
 
-### Advanced Features Documentation ✨NEW
-8. **CoT_Implementation_Guide.md** - Comprehensive Chain of Thought guide
-   - Query complexity assessment
-   - Thinking budget allocation
-   - API usage examples
-   - Performance metrics
+### LangChain & Agentic RAG Documentation (NEW)
+8. **LANGCHAIN_ARCHITECTURE.md** - LangChain integration guide (new)
+   - Agent design and ReAct pattern
+   - Tool definitions and capabilities
+   - Chain architecture and workflows
+   - Integration examples
 
-9. **CoT_Implementation_Summary.md** - Quick CoT reference
-   - Configuration options
-   - Usage examples
-   - Expected improvements
+9. **AGENTIC_RAG_GUIDE.md** - Agentic RAG implementation (new)
+   - Autonomous reasoning patterns
+   - Hybrid retrieval strategy
+   - Tool invocation workflows
+   - Performance optimization
 
-10. **RAG_Performance_Improvement_Analysis.md** - RAG system analysis
-    - Current architecture analysis
-    - Performance bottlenecks
-    - Improvement roadmap (4 phases)
-    - Expected performance gains
-
-11. **Project_Cleanup_Summary.md** - Project organization improvements
-    - New folder structures (rules/, database/)
-    - .gitignore updates
-    - Code cleanup summary
-
-12. **Emoji_Cleanup_Summary.md** - Logging standardization
-    - Emoji removal from code
-    - Log format standardization
-    - Before/after examples
+10. **RAG_HYBRID_RETRIEVAL.md** - Hybrid search implementation (new)
+    - BM25 keyword matching
+    - Semantic search with embeddings
+    - Ensemble retriever weights
+    - Performance comparison
 
 ### Folder-Specific Documentation
-13. **backend/app/rules/README.md** - Rule-based system documentation
-14. **database/README.md** - Database structure and usage guide
+11. **backend/app/agents/README.md** - Agent implementation details (new)
+12. **backend/app/chains/README.md** - Chain implementation details (new)
+13. **database/README.md** - Database structure and usage guide
 
 ## Technology Stack Summary
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Frontend | Angular | 15.2.10 |
-| UI Library | Angular Material | 15.2.9 |
-| Language (Frontend) | TypeScript | 4.9 |
-| Backend | FastAPI | 0.104.1 |
-| Language (Backend) | Python | 3.8+ |
-| LLM | Google Gemini | 2.5 Flash |
-| LLM API | google-genai | 0.2.0+ |
-| Legacy LLM API | google-generativeai | 0.7.2 |
-| RAG | Custom | Keyword-based |
-| Database ORM | SQLAlchemy | 2.0.23 |
-| Testing (Frontend) | Jasmine + Karma | 4.5 / 6.4 |
-| Testing (Backend) | Pytest | 7.4.3 |
-| Package Manager (Frontend) | NPM | 9.2.0 |
-| Package Manager (Backend) | Pip | - |
+| Component | Technology | Version | Purpose |
+|-----------|-----------|---------|---------|
+| Frontend | Angular | 15.2.10 | Web UI framework |
+| UI Library | Angular Material | 15.2.9 | Material Design |
+| Language (Frontend) | TypeScript | 4.9 | Type-safe frontend |
+| Backend | FastAPI | 0.104.1 | API framework |
+| Language (Backend) | Python | 3.8+ | Backend logic |
+| Agent Framework | LangChain | 0.1.11 | Agent orchestration |
+| LangChain Integration | langchain-google-genai | 0.0.10 | Gemini integration |
+| LLM | Google Gemini | 2.5 Flash | Language model |
+| Vector Database | Chroma | 0.4.22 | Semantic search |
+| Embeddings | Sentence Transformers | 2.2.2 | Text embeddings |
+| Keyword Search | Rank-BM25 | 0.2.2 | BM25 retrieval |
+| RAG | Hybrid (BM25 + Semantic) | LangChain | Ensemble retrieval |
+| Database ORM | SQLAlchemy | 2.0.23 | Data persistence |
+| Testing (Frontend) | Jasmine + Karma | 4.5 / 6.4 | Unit tests |
+| Testing (Backend) | Pytest | 7.4.3 | Python tests |
+| Package Manager (Frontend) | NPM | 9.2.0 | Node packages |
+| Package Manager (Backend) | Pip | Latest | Python packages |
 
 ## Development Team
 
@@ -505,27 +531,37 @@ For issues or questions:
 
 This project is part of WPI Business School.
 
-## Recent Improvements ✨
+## Recent Improvements
 
-**Chain of Thought (CoT) - October 2025**
-- ✅ Native thinking mode with Gemini 2.5 Flash
-- ✅ Automatic query complexity assessment
-- ✅ Dynamic thinking budget allocation (1K-10K tokens)
-- ✅ 15-25% accuracy improvement on complex queries
-- ✅ Reduced hallucination rate by 50%
+**LangChain Agentic RAG - November 2025**
+- Implemented LangChain-based agent framework
+- ReAct (Reasoning and Acting) pattern for autonomous reasoning
+- Created adviser agent with multi-step decision-making
+- Hybrid RAG combining BM25 and semantic search
+- Tool-based knowledge retrieval system
+- Ensemble retriever for improved relevance ranking
 
-**RAG System Analysis - October 2025**
-- ✅ Comprehensive architecture analysis
-- ✅ Performance bottleneck identification
-- ✅ 4-phase improvement roadmap
-- ✅ Expected 40% → 90%+ retrieval accuracy path
+**RAG Optimization - November 2025**
+- Hybrid retrieval combining keyword and semantic search
+- BM25 implementation for fast keyword matching
+- Semantic search with Chroma vector database
+- Sentence Transformers embeddings (all-MiniLM-L6-v2)
+- 50-50 weighted ensemble for balanced results
+- Improved context relevance and ranking
 
-**Project Organization - October 2025**
-- ✅ New folder structures (rules/, database/)
-- ✅ Enhanced .gitignore patterns
-- ✅ Cleaned up unused code
-- ✅ Standardized logging format (removed emojis from code)
-- ✅ Comprehensive documentation (14 guides)
+**File Structure Reorganization - November 2025**
+- New agents/ directory for LangChain agent implementations
+- New chains/ directory for processing pipeline chains
+- Separated tools, agents, and chains for modularity
+- Enhanced backend architecture for scalability
+- Cleaner separation of concerns
+
+**Documentation Updates - November 2025**
+- Updated README with LangChain architecture
+- Removed emoji indicators throughout documentation
+- Technology stack updated with all LangChain components
+- New documentation structure for agentic RAG
+- Configuration examples for hybrid retrieval
 
 ## Future Enhancements
 

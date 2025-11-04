@@ -1,15 +1,16 @@
 """
-API endpoints for chat functionality with intelligent intent-based routing.
-Uses shared context cache for efficient handling of PDF data.
+API endpoints for chat functionality with LangChain agentic RAG.
+Uses ReAct agent pattern with autonomous tool use for knowledge retrieval.
+Supports multi-turn conversation with memory management.
 """
 from fastapi import APIRouter, HTTPException
-import google.generativeai as genai
 import logging
 from ..schemas.chat import ChatRequest, ChatResponse, IntentType
-from ..services.llm_service import LLMService
-from ..services.intent_detection_service import IntentDetectionService
-from ..services.rule_based_response_service import RuleBasedResponseService
+from ..agents.adviser_agent import get_adviser_agent
+from ..chains.rag_chain import get_rag_chain
+from ..chains.chat_chain import get_chat_chain
 from ..services.context_manager import get_context_manager
+from ..services.conversation_memory import get_conversation_memory, generate_session_id
 from ..utils.error_handler import handle_llm_error
 
 logger = logging.getLogger(__name__)
@@ -17,54 +18,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Lazy initialization - services created on first request, not at module load
-# This ensures .env is fully loaded before services initialize
-_llm_service = None
-_intent_service = None
-_rule_based_service = None
+_adviser_agent = None
+_rag_chain = None
+_chat_chain = None
 
 
-def get_llm_service():
-    """Get or create LLMService (lazy initialization)"""
-    global _llm_service
-    if _llm_service is None:
-        _llm_service = LLMService()
-    return _llm_service
+def get_agent():
+    """Get or create AdviserAgent (lazy initialization)"""
+    global _adviser_agent
+    if _adviser_agent is None:
+        _adviser_agent = get_adviser_agent()
+    return _adviser_agent
 
 
-def get_intent_service():
-    """Get or create IntentDetectionService (lazy initialization)"""
-    global _intent_service
-    if _intent_service is None:
-        _intent_service = IntentDetectionService()
-    return _intent_service
+def get_rag():
+    """Get or create RAG chain (lazy initialization)"""
+    global _rag_chain
+    if _rag_chain is None:
+        _rag_chain = get_rag_chain()
+    return _rag_chain
 
 
-def get_rule_based_service():
-    """Get or create RuleBasedResponseService (lazy initialization)"""
-    global _rule_based_service
-    if _rule_based_service is None:
-        _rule_based_service = RuleBasedResponseService()
-    return _rule_based_service
+def get_chat():
+    """Get or create Chat chain (lazy initialization)"""
+    global _chat_chain
+    if _chat_chain is None:
+        _chat_chain = get_chat_chain()
+    return _chat_chain
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """
-    Process a chat message with intelligent intent detection and routing.
+    Process a chat message using LangChain agentic RAG with ReAct pattern.
 
     Flow:
-    1. Detect user intent using Gemini LLM
-    2. Route to rule-based system if applicable
-    3. Otherwise use LLM with system prompt
-    4. Return response with intent metadata
+    1. Generate or use existing session ID for conversation memory
+    2. Store user message in conversation history
+    3. Use agentic RAG (adviser agent) for autonomous tool-based reasoning
+    4. Agent uses RAG retrieval and context lookup tools
+    5. Store assistant response in conversation history
+    6. Return response with source metadata and session ID
 
     Args:
-        request: ChatRequest containing message and optional transcript context
+        request: ChatRequest containing message, optional transcript context, and optional session_id
 
     Returns:
-        ChatResponse with generated message and intent classification
+        ChatResponse with generated message, response source, and session info
     """
-    logger.info(f"Chat request received: '{request.message[:50]}...'")
+    logger.info(f"Chat request received via LangChain: '{request.message[:50]}...'")
 
     try:
         # Validate input
@@ -80,96 +82,166 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
         logger.debug(f"Input validation passed. Message length: {len(request.message)}")
 
-        # Get cached student context from ContextManager
+        # Handle session ID and conversation memory
+        session_id = request.session_id or generate_session_id()
+        memory = get_conversation_memory()
+        memory.add_user_message(session_id, request.message)
+        logger.info(f"Session: {session_id}, stored user message")
+
+        # Get cached student context from ContextManager (full transcript data from PDF)
         context_manager = get_context_manager()
         cached_context = context_manager.get_student_context()
 
-        # Use cached context if available, otherwise use request context
-        if cached_context and not request.transcript_context:
-            print("\n[Chat API] Using cached student context from PDF extraction")
-            # Create a proper TranscriptContext object from cached data
-            from ..schemas.chat import TranscriptContext
-            request.transcript_context = TranscriptContext(
-                student_name=cached_context.student_name,
-                gpa=cached_context.gpa,
-                program=cached_context.program_info.program_name if cached_context.program_info else None,
-                course_count=(len(cached_context.completed_courses) if cached_context.completed_courses else 0) +
-                             (len(cached_context.current_courses) if cached_context.current_courses else 0)
+        # Determine which context to use: cached (from PDF) or request context (from API)
+        student_context_to_use = None
+        context_source = "none"
+
+        if cached_context:
+            # Use full cached context from PDF extraction (has student_id, courses, grades, etc.)
+            logger.info("Using complete cached student context from PDF extraction")
+            logger.info(f"Cached context: {cached_context.student_name}, ID: {cached_context.student_id}, GPA: {cached_context.gpa}")
+            logger.info(f"Completed courses: {len(cached_context.completed_courses) if cached_context.completed_courses else 0}")
+            logger.info(f"Current courses: {len(cached_context.current_courses) if cached_context.current_courses else 0}")
+            student_context_to_use = cached_context
+            context_source = "cached_pdf"
+        elif request.transcript_context:
+            # Use request context if no cached context
+            logger.info("Using student context from API request")
+            # Convert to ExtractedTranscriptData for consistency
+            from ..schemas.transcript import ExtractedTranscriptData, ProgramInfo
+            student_context_to_use = ExtractedTranscriptData(
+                student_name=request.transcript_context.student_name,
+                student_id=request.transcript_context.student_name or "N/A",  # Fallback
+                gpa=request.transcript_context.gpa,
+                program_info=ProgramInfo(program_name=request.transcript_context.program) if request.transcript_context.program else None,
+                completed_courses=[],
+                current_courses=[]
             )
-            print(f"   Using: {cached_context.student_name} (GPA: {cached_context.gpa})")
-        elif not request.transcript_context:
-            print("\n[Chat API] No student context available (PDF not uploaded)")
+            context_source = "api_request"
+        else:
+            logger.info("No student context available (PDF not uploaded, no context in request)")
+            context_source = "none"
 
-        # Step 1: Detect intent using Gemini LLM
-        logger.info("Step 1: Detecting intent with Gemini LLM...")
-        try:
-            intent_classification = await get_intent_service().detect_intent(
-                question=request.message,
-                context=request.transcript_context,
-            )
-            logger.info(f"✓ Intent detected: {intent_classification.intent.value} (confidence: {intent_classification.confidence:.2f})")
-            logger.debug(f"  - Requires transcript: {intent_classification.requires_transcript}")
-            logger.debug(f"  - Rule applicable: {intent_classification.rule_applicable}")
-            logger.debug(f"  - Suggested type: {intent_classification.suggested_response_type}")
-        except Exception as e:
-            logger.error(f"✗ Intent detection failed: {str(e)}", exc_info=True)
-            raise
+        # Use LangChain agentic RAG for response
+        logger.info(f"Processing with LangChain agentic RAG (ReAct agent), context_source={context_source}")
 
-        response_text = None
-        response_source = "llm"
+        agent = get_agent()
+        result = await agent.answer_query(
+            query=request.message,
+            context=student_context_to_use,
+            program_id="msit"
+        )
 
-        # # Step 2: Try rule-based response if applicable
-        # if intent_classification.rule_applicable and intent_classification.suggested_response_type in ["rule_based", "hybrid"]:
-        #     logger.info("Step 2: Attempting rule-based response...")
-        #     try:
-        #         response_text = await rule_based_service.generate_response(
-        #             intent=intent_classification.intent,
-        #             question=request.message,
-        #             context=request.transcript_context,
-        #         )
-        #         if response_text:
-        #             response_source = "rule_based"
-        #             logger.info(f"✓ Rule-based response generated (length: {len(response_text)} chars)")
-        #         else:
-        #             logger.info("Rule-based response returned None, will fall back to LLM")
-        #     except Exception as e:
-        #         logger.warning(f"⚠ Rule-based generation failed: {str(e)}", exc_info=True)
-        #         logger.info("Will fall back to LLM")
-        # else:
-        #     logger.info("Step 2: Skipping rule-based (not applicable for this intent)")
+        response_text = result.get("response", "")
+        response_source = result.get("source", "agentic_rag")
 
-        # Step 3: Fall back to LLM if no rule-based response
-        if not response_text:
-            logger.info("Step 3: Generating LLM response...")
-            try:
-                response_text = await get_llm_service().generate_response(
-                    message=request.message,
-                    context=request.transcript_context,
-                )
-                logger.info(f"✓ LLM response generated (length: {len(response_text)} chars)")
-                if intent_classification.rule_applicable and response_source == "rule_based":
-                    response_source = "hybrid"
-                    logger.info("Response source: hybrid (rule + LLM)")
-                else:
-                    response_source = "llm"
-                    logger.info("Response source: llm")
-            except Exception as e:
-                logger.error(f"✗ LLM response generation failed: {str(e)}", exc_info=True)
-                raise
+        # Store assistant response in conversation memory
+        memory.add_ai_message(session_id, response_text)
+        logger.info(f"Session: {session_id}, stored assistant response")
 
-        # Return response with intent metadata
-        logger.info(f"✓ Chat endpoint complete. Response source: {response_source}")
-        return ChatResponse(
+        # Create a default intent classification for response
+        from ..schemas.chat import IntentClassification
+        intent_classification = IntentClassification(
+            intent=IntentType.GENERAL_ACADEMIC,
+            confidence=0.85,
+            requires_transcript=request.transcript_context is not None,
+            rule_applicable=False,
+            suggested_response_type="llm"
+        )
+
+        logger.info(f"LangChain response generated: {len(response_text)} chars, source: {response_source}")
+
+        # Return response with session ID for client to use in follow-up messages
+        response = ChatResponse(
             response=response_text,
             intent=intent_classification,
             response_source=response_source
         )
 
+        # Store session_id in response metadata by adding custom header
+        logger.debug(f"Returning response with session_id: {session_id}")
+        return response
+
     except ValueError as e:
         error_detail = f"Validation error: {str(e)}"
-        logger.error(f"✗ {error_detail}")
+        logger.error(f"Validation error: {error_detail}")
         raise HTTPException(status_code=400, detail=error_detail)
     except Exception as e:
-        logger.error(f"✗ Unexpected error in chat endpoint: {str(e)}", exc_info=True)
+        logger.error(f"Unexpected error in chat endpoint: {str(e)}", exc_info=True)
         http_exception = handle_llm_error(e)
         raise http_exception
+
+
+@router.get("/chat/history/{session_id}")
+async def get_conversation_history(session_id: str):
+    """
+    Retrieve conversation history for a given session ID.
+
+    Args:
+        session_id: The session ID to retrieve history for
+
+    Returns:
+        Dict containing conversation history and metadata
+    """
+    logger.info(f"Retrieving conversation history for session: {session_id}")
+
+    try:
+        memory = get_conversation_memory()
+        history = memory.get_history(session_id)
+        summary = memory.get_session_summary(session_id)
+
+        return {
+            "session_id": session_id,
+            "message_count": len(history),
+            "summary": summary,
+            "messages": history
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrieving conversation history: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
+
+
+@router.delete("/chat/history/{session_id}")
+async def clear_conversation_history(session_id: str):
+    """
+    Clear conversation history for a given session ID.
+
+    Args:
+        session_id: The session ID to clear
+
+    Returns:
+        Success message
+    """
+    logger.info(f"Clearing conversation history for session: {session_id}")
+
+    try:
+        memory = get_conversation_memory()
+        memory.clear_session(session_id)
+
+        return {
+            "status": "success",
+            "message": f"Conversation history cleared for session {session_id}"
+        }
+
+    except Exception as e:
+        logger.error(f"Error clearing conversation history: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error clearing history: {str(e)}")
+
+
+@router.get("/chat/memory/stats")
+async def get_memory_stats():
+    """
+    Get memory management statistics.
+
+    Returns:
+        Dict with conversation memory stats
+    """
+    try:
+        memory = get_conversation_memory()
+        stats = memory.get_stats()
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error retrieving memory stats: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
