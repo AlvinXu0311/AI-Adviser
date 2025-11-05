@@ -122,14 +122,32 @@ class RAGService:
     def _build_bm25_index(self) -> BM25Okapi:
         """Build BM25 index from documents"""
         try:
-            # Tokenize documents
-            tokenized_docs = [
-                doc["text"].lower().split()
-                for doc in self.documents
-            ]
+            # Tokenize documents with better handling of stop words
+            tokenized_docs = []
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be',
+                'what', 'when', 'where', 'why', 'how', 'tell', 'me', 'about',
+                'you', 'i', 'we', 'they', 'he', 'she', 'it', 'this', 'that',
+                'which', 'who', 'whom', 'all', 'each', 'every', 'both', 'few',
+                'more', 'most', 'some', 'any', 'do', 'does', 'did', 'have', 'has'
+            }
+
+            for doc in self.documents:
+                # Tokenize and filter out stop words and very short tokens
+                tokens = [
+                    token for token in doc["text"].lower().split()
+                    if token not in stop_words and len(token) > 2
+                ]
+                # Always include at least key words even if short (like "IT", "MS")
+                tokens.extend([
+                    token for token in doc["text"].lower().split()
+                    if token in ['it', 'ms', 'ba', 'is'] and len(token) <= 2
+                ])
+                tokenized_docs.append(tokens)
 
             bm25 = BM25Okapi(tokenized_docs)
-            logger.info("BM25 index built successfully")
+            logger.info(f"BM25 index built successfully with {len(tokenized_docs)} documents")
             return bm25
         except Exception as e:
             logger.error(f"Error building BM25 index: {str(e)}")
@@ -219,8 +237,26 @@ class RAGService:
             intent = self._detect_query_intent(query)
             logger.info(f"Query intent: graduation={intent['graduation_focus']}, admission={intent['admission_focus']}")
 
-            # Tokenize query
-            query_tokens = query.lower().split()
+            # Tokenize query with same stop word filtering as documents
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be',
+                'what', 'when', 'where', 'why', 'how', 'tell', 'me', 'about',
+                'you', 'i', 'we', 'they', 'he', 'she', 'it', 'this', 'that',
+                'which', 'who', 'whom', 'all', 'each', 'every', 'both', 'few',
+                'more', 'most', 'some', 'any', 'do', 'does', 'did', 'have', 'has'
+            }
+            query_tokens = [
+                token for token in query.lower().split()
+                if token not in stop_words and len(token) > 2
+            ]
+            # Always include key acronyms/short words
+            query_tokens.extend([
+                token for token in query.lower().split()
+                if token in ['it', 'ms', 'ba', 'is'] and len(token) <= 2
+            ])
+
+            logger.info(f"Query tokens after filtering: {query_tokens}")
 
             # Get BM25 scores
             scores = self.bm25.get_scores(query_tokens)
@@ -300,7 +336,13 @@ class RAGService:
                     logger.debug(f"Skipping low-score document: {scores[idx]}")
 
             if not results:
-                logger.warning(f"No relevant documents found for query: {query[:50]}")
+                logger.warning(f"No relevant documents found for query: {query[:50]}, providing program overview as fallback")
+                # Fallback: return program overview if no results
+                for program in self.knowledge_base.get("programs", []):
+                    if program.get("id") == program_id:
+                        overview = program.get("overview", "")
+                        if overview:
+                            return f"Program Information:\n{program.get('name', '')} - {overview}"
                 return "No relevant information found."
 
             # Format results

@@ -57,18 +57,25 @@ CORE RESPONSIBILITIES:
 3. Provide guidance on specializations and elective options
 4. Address questions about student transcripts and academic progress (if uploaded)
 
-TOOL USAGE STRATEGY (ReAct Pattern):
-You have three tools available - use them strategically:
-1. rag_search: Use for program/course knowledge questions
-2. student_context: Use ONLY for personal academic progress questions
-3. assess_complexity: Use to understand question depth before responding
+MANDATORY TOOL USAGE (ReAct Pattern):
+You MUST use tools for every question. Here's what to do:
+
+Program/Course Questions (MUST use rag_search):
+- "What is MSIT?" → Use rag_search
+- "What are the courses?" → Use rag_search
+- "What are requirements?" → Use rag_search
+- "What specializations?" → Use rag_search
+
+Personal Progress Questions (use student_context):
+- "What's my GPA?" → Use student_context
+- "What courses did I take?" → Use student_context
 
 CRITICAL RULES:
-- ONLY answer based on information from tools or knowledge base
-- NEVER invent course codes, credits, or program details
-- If tools return no information, respond: "I don't have that information in the knowledge base"
+- NEVER answer "I don't have information" without using rag_search first
+- ONLY use tool-provided data - never invent course codes, credits, or requirements
+- Always say what tool you used: "According to our knowledge base..."
 - Be concise (2-3 sentences max unless detailed explanation needed)
-- Answer the specific question - no unsolicited advice
+- If tools return nothing, explicitly say: "I don't have that in the knowledge base"
 - For personal questions without transcript: suggest uploading a PDF"""
 
         self.agent_executor = self._create_agent()
@@ -84,29 +91,30 @@ You have access to:
 - Student transcript cache (if they uploaded their PDF)
 - Query complexity assessment tool
 
-AGENTIC REASONING (ReAct Pattern):
-For EVERY question, follow this thinking process:
+MANDATORY TOOL USAGE (ReAct Pattern):
+You MUST use tools for EVERY question. Follow this process:
 
-1. ANALYZE: What type of question is this?
-   - Program/course question → Use rag_search
-   - Personal progress question → Use student_context first
-   - Complex question → Use assess_complexity to understand depth
+1. IDENTIFY QUESTION TYPE:
+   - "program/course/specialization/requirement/graduation/prerequisite" → MUST use rag_search FIRST
+   - "my GPA/transcript/progress/grades/courses" → use student_context
+   - Anything uncertain → use assess_complexity then rag_search
 
-2. ACT: Use one or two tools strategically
-   - Retrieve the MINIMUM information needed
-   - Don't use same tool twice
-   - Use results to form accurate answer
+2. USE TOOLS (REQUIRED):
+   For program/course questions: ALWAYS call rag_search with the user's question
+   Example: User says "What are MSIT requirements?"
+   → You MUST respond: Action: rag_search
+                        Action Input: What are MSIT requirements?
 
-3. RESPOND: Provide final answer
-   - Reference specific courses/programs when applicable
-   - Cite information from tools, not general knowledge
-   - Be direct and concise
+3. RESPOND ONLY WITH TOOL DATA:
+   - Quote course codes, credits, and specialization names directly from tool results
+   - If tool returns no results, say "I don't have that information in the knowledge base"
+   - Never answer from general knowledge about WPI
 
-CRITICAL CONSTRAINTS:
-- ONLY use tool-provided information (no general knowledge about WPI)
-- NEVER make up: course codes, credit values, requirements, or program details
-- If information unavailable, explicitly say so
-- Maximum 2-3 tools per question
+CRITICAL RULES (VIOLATIONS = WRONG ANSWER):
+- If user asks about programs/courses/requirements → rag_search is MANDATORY
+- NEVER answer "I don't have information" if you haven't used rag_search yet
+- NEVER invent course codes, credits, or requirements
+- Always cite source: "According to our knowledge base..."
 
 You have access to the following tools:
 
@@ -115,14 +123,12 @@ You have access to the following tools:
 Use the following format:
 
 Question: the input question you must answer
-Thought: you should always think about what to do
+Thought: I need to identify what information to retrieve
 Action: the action to take, should be one of [{tool_names}]
 Action Input: the input to the action
 Observation: the result of the action
-Thought: I now have the information I need to answer
+Thought: I now have the information needed to answer accurately
 Final Answer: the final answer to the original input question
-
-IMPORTANT: After getting an Observation from a tool, provide your Final Answer immediately. Do NOT use the same tool twice.
 
 Begin!
 
@@ -166,6 +172,29 @@ Thought:{agent_scratchpad}"""
         try:
             logger.info(f"Processing query with adviser agent: {query[:50]}...")
 
+            # Check if this is a program/course question that MUST use RAG
+            query_lower = query.lower()
+            program_keywords = ['msit', 'msba', 'msm', 'course', 'requirement', 'specialization',
+                               'graduation', 'prerequisite', 'program', 'core', 'degree', 'major']
+            is_program_question = any(kw in query_lower for kw in program_keywords)
+
+            if is_program_question:
+                logger.info("Detected program/course question - USING RAG for knowledge retrieval")
+                # For program questions, directly use RAG to ensure knowledge base is queried
+                from .rag_agent import get_rag_agent
+                rag_agent = get_rag_agent()
+                rag_result = await rag_agent.retrieve_for_query(query, program_id=program_id, top_k=8)
+                rag_context = rag_result.get("context", "")
+
+                if rag_context:
+                    logger.info(f"RAG retrieved {len(rag_context)} chars of context for program question")
+                    # Inject RAG context into the query to guide the agent
+                    query_with_context = f"{query}\n\n[Knowledge Base Information Available]:\n{rag_context}"
+                else:
+                    query_with_context = query
+            else:
+                query_with_context = query
+
             # Store context for tool access
             if context:
                 context_manager = get_context_manager()
@@ -196,7 +225,7 @@ Thought:{agent_scratchpad}"""
                 logger.info("No transcript context provided - user must upload PDF for personalized info")
 
             # Format input with context information
-            input_text = self._format_agent_input(query, context, program_id)
+            input_text = self._format_agent_input(query_with_context, context, program_id)
 
             # Execute agent
             logger.info("Executing Chat Agent with ReAct pattern...")
