@@ -18,7 +18,7 @@ PIDFILE=".chatbot_pids"
 
 # Check if PID file exists
 if [ ! -f "$PIDFILE" ]; then
-    echo -e "${YELLOW}⚠ No process ID file found${NC}"
+    echo -e "${YELLOW}No process ID file found${NC}"
     echo "Attempting to kill processes on ports 4200 and 8000..."
 
     # Try to kill processes on specific ports
@@ -27,17 +27,17 @@ if [ ! -f "$PIDFILE" ]; then
         FRONTEND_PID=$(lsof -ti :4200)
         if [ ! -z "$FRONTEND_PID" ]; then
             kill -9 $FRONTEND_PID 2>/dev/null
-            echo -e "${GREEN}✓ Stopped Frontend (PID: $FRONTEND_PID)${NC}"
+                echo -e "${GREEN}Stopped Frontend (PID: $FRONTEND_PID)${NC}"
         fi
 
         # Kill process on port 8000 (Backend)
         BACKEND_PID=$(lsof -ti :8000)
         if [ ! -z "$BACKEND_PID" ]; then
             kill -9 $BACKEND_PID 2>/dev/null
-            echo -e "${GREEN}✓ Stopped Backend (PID: $BACKEND_PID)${NC}"
+            echo -e "${GREEN}Stopped Backend (PID: $BACKEND_PID)${NC}"
         fi
     else
-        echo -e "${YELLOW}⚠ lsof not found, trying alternative method...${NC}"
+        echo -e "${YELLOW}lsof not found, trying alternative method...${NC}"
         # For Windows or systems without lsof
         if command -v netstat &> /dev/null; then
             echo "Found processes, attempting to kill..."
@@ -45,7 +45,7 @@ if [ ! -f "$PIDFILE" ]; then
             if command -v pkill &> /dev/null; then
                 pkill -f "ng serve" 2>/dev/null
                 pkill -f "uvicorn" 2>/dev/null
-                echo -e "${GREEN}✓ Killed processes${NC}"
+                echo -e "${GREEN}Killed processes${NC}"
             fi
         fi
     fi
@@ -57,9 +57,9 @@ else
         if [ ! -z "$PID" ]; then
             if ps -p $PID > /dev/null 2>&1; then
                 kill -9 $PID 2>/dev/null
-                echo -e "${GREEN}✓ Stopped process (PID: $PID)${NC}"
+                echo -e "${GREEN}Stopped process (PID: $PID)${NC}"
             else
-                echo -e "${YELLOW}⚠ Process $PID not found${NC}"
+                echo -e "${YELLOW}Process $PID not found${NC}"
             fi
         fi
     done < "$PIDFILE"
@@ -71,7 +71,7 @@ fi
 
 echo ""
 echo "================================"
-echo -e "${GREEN}✓ Services Stopped${NC}"
+echo -e "${GREEN}Services Stopped${NC}"
 echo "================================"
 echo ""
 echo "Port 4200 (Frontend):  Available"

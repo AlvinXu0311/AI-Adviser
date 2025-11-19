@@ -145,7 +145,7 @@ Thought:{agent_scratchpad}"""
         executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
-            verbose=True,
+            verbose=False,  # Disabled verbose stdout callback to avoid callback errors
             max_iterations=5,  # Reduced from 10 to prevent looping
             early_stopping_method="force",
             handle_parsing_errors=True  # Allow agent to recover from parsing errors

@@ -33,28 +33,58 @@ class RedisConversationMemory:
         self.redis_port = redis_port
         self.redis_db = redis_db
 
-        # Try to connect to Redis
-        self.redis_available = False
+        # Try to connect to Redis with retries and URL support
+        # Per policy: Redis is required. If Redis is not available, raise an exception.
+        self.in_memory_store: Dict[str, List[Dict[str, Any]]] = {}
+
         try:
             import redis
+            import time
 
-            self.redis_client = redis.Redis(
-                host=redis_host,
-                port=redis_port,
-                db=redis_db,
-                decode_responses=True,
-                socket_connect_timeout=5
-            )
-            # Test connection
-            self.redis_client.ping()
-            self.redis_available = True
-            logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
+            # Support REDIS_URL environment variable for flexibility
+            redis_url = os.getenv("REDIS_URL")
+            client = None
+
+            if redis_url:
+                try:
+                    client = redis.from_url(redis_url, decode_responses=True)
+                    logger.info(f"Attempting Redis connection via REDIS_URL")
+                except Exception as ex:
+                    logger.debug(f"Redis.from_url failed: {ex}")
+                    client = None
+
+            if client is None:
+                client = redis.Redis(
+                    host=redis_host,
+                    port=redis_port,
+                    db=redis_db,
+                    decode_responses=True,
+                    socket_connect_timeout=5
+                )
+
+            # Try pinging Redis with a few retries to handle transient startup timing
+            last_exc = None
+            for attempt in range(3):
+                try:
+                    client.ping()
+                    self.redis_client = client
+                    logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
+                    break
+                except Exception as e:
+                    last_exc = e
+                    logger.debug(f"Redis ping attempt {attempt+1} failed: {e}")
+                    time.sleep(0.5)
+
+            if not hasattr(self, "redis_client"):
+                # No successful connection — raise an error (do not fall back)
+                raise RuntimeError(f"Unable to connect to Redis at {redis_host}:{redis_port}: {last_exc}")
+
         except Exception as e:
-            logger.warning(f"Redis connection failed: {str(e)}. Falling back to in-memory storage.")
-            self.redis_available = False
-            self.in_memory_store: Dict[str, List[Dict[str, Any]]] = {}
+            # Fail loudly: Redis is required
+            logger.error(f"Redis initialization error: {e}")
+            raise
 
-    def get_chat_history(self, session_id: str) -> "BaseChatHistory":
+    def get_chat_history(self, session_id: str) -> Any:
         """
         Get LangChain-compatible chat history for a session.
         Uses Redis if available, otherwise in-memory fallback.
@@ -65,19 +95,44 @@ class RedisConversationMemory:
         Returns:
             Chat history object for the session
         """
-        if self.redis_available:
-            try:
-                return RedisChatMessageHistory(
-                    session_id=session_id,
-                    connection=self.redis_client,
-                )
-            except Exception as e:
-                logger.error(f"Error creating RedisChatMessageHistory: {str(e)}")
-                # Fallback to in-memory
-                self.redis_available = False
-                return self._get_in_memory_history(session_id)
-        else:
-            return self._get_in_memory_history(session_id)
+        # Redis must be available here; otherwise __init__ would have raised.
+        # Try constructing RedisChatMessageHistory and raise on failure.
+        try:
+            # Different langchain-community versions expect different ctor args.
+            # Try several common constructor signatures for compatibility.
+            constructors = [
+                ("connection", lambda: RedisChatMessageHistory(session_id=session_id, connection=self.redis_client)),
+                ("client", lambda: RedisChatMessageHistory(session_id=session_id, client=self.redis_client)),
+                ("redis_client", lambda: RedisChatMessageHistory(session_id=session_id, redis_client=self.redis_client)),
+                ("redis_url", lambda: RedisChatMessageHistory(session_id=session_id, redis_url=os.getenv("REDIS_URL") or f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}")),
+                ("host_port", lambda: RedisChatMessageHistory(session_id=session_id, host=self.redis_host, port=self.redis_port, db=self.redis_db)),
+                # Fallback: try no args (some versions may pick up default redis settings)
+                ("no_args", lambda: RedisChatMessageHistory(session_id=session_id)),
+            ]
+
+            last_exc = None
+            for name, ctor in constructors:
+                try:
+                    hist = ctor()
+                    logger.debug(f"RedisChatMessageHistory created using signature: {name}")
+                    return hist
+                except TypeError as te:
+                    # Constructor signature mismatch; try next
+                    logger.debug(f"RedisChatMessageHistory ctor '{name}' TypeError: {te}")
+                    last_exc = te
+                    continue
+                except Exception as e:
+                    # Other runtime errors (connection, etc.) — record and try next
+                    logger.debug(f"RedisChatMessageHistory ctor '{name}' raised: {e}")
+                    last_exc = e
+                    continue
+
+            # If none of the constructors worked, raise an error (do not fall back)
+            logger.error(f"Error creating RedisChatMessageHistory with available signatures: {last_exc}")
+            raise RuntimeError(f"Failed to create RedisChatMessageHistory: {last_exc}")
+        except Exception:
+            # Propagate exceptions to the caller — Redis is required.
+            raise
 
     def _get_in_memory_history(self, session_id: str) -> "InMemoryChatHistory":
         """Get in-memory fallback history"""
@@ -170,9 +225,14 @@ class RedisConversationMemory:
         """Get conversation memory statistics"""
         if self.redis_available:
             try:
-                # Get stats from Redis
-                keys = self.redis_client.keys("*")
-                session_count = len(keys)
+                # Use SCAN iterator to avoid blocking Redis for large keyspaces
+                try:
+                    session_count = sum(1 for _ in self.redis_client.scan_iter())
+                except Exception:
+                    # Fallback to KEYS if SCAN not supported
+                    keys = self.redis_client.keys("*")
+                    session_count = len(keys)
+
                 return {
                     "status": "redis_connected",
                     "redis_host": self.redis_host,
@@ -252,7 +312,7 @@ def get_conversation_memory() -> RedisConversationMemory:
             redis_port=redis_port,
             redis_db=redis_db
         )
-        logger.info("Initialized conversation memory (Redis or In-Memory fallback)")
+        logger.info("Initialized conversation memory (Redis)")
 
     return _conversation_memory
 
@@ -273,3 +333,61 @@ def generate_session_id(identifier: str = "") -> str:
         return hashlib.md5(identifier.encode()).hexdigest()[:16]
     else:
         return hashlib.md5(str(datetime.now()).encode()).hexdigest()[:16]
+
+    # Backwards-compatible wrappers expected by API
+
+
+def get_history(session_id: str):
+    """
+    Backwards-compatible wrapper to return a serializable conversation history.
+    Returns a list of dicts: {"role": "user|assistant|other", "content": "..."}
+    """
+    memory = get_conversation_memory()
+    try:
+        messages = memory.get_messages(session_id)
+    except Exception:
+        # Fallback to empty list
+        messages = []
+
+    serialized = []
+    try:
+        from langchain_core.messages import HumanMessage, AIMessage
+        for msg in messages:
+            role = "other"
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+
+            serialized.append({
+                "role": role,
+                "content": getattr(msg, "content", "")
+            })
+    except Exception:
+        # If langchain types not available, try to stringify messages
+        for msg in messages:
+            try:
+                serialized.append({"role": "other", "content": str(msg)})
+            except Exception:
+                serialized.append({"role": "other", "content": ""})
+
+    return serialized
+
+
+def get_session_summary(session_id: str) -> str:
+    """Wrapper for API expected `get_session_summary` name."""
+    memory = get_conversation_memory()
+    try:
+        return memory.get_summary(session_id)
+    except Exception:
+        return ""
+
+
+def clear_session(session_id: str) -> None:
+    """Wrapper for API expected `clear_session` name."""
+    memory = get_conversation_memory()
+    try:
+        memory.clear_history(session_id)
+    except Exception:
+        # best-effort
+        pass

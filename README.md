@@ -2,18 +2,6 @@
 
 Interactive chatbot platform for academic advising with PDF transcript upload, agentic RAG, and LangChain-powered responses.
 
-## Project Overview
-
-This system provides 24/7 support to WPI Business School students by offering:
-- Interactive chat for academic queries using LangChain agentic RAG
-- PDF transcript upload with automatic extraction using Gemini Vision API
-- Agentic RAG system with ReAct pattern for autonomous knowledge retrieval
-- LLM-powered responses using Google Gemini 2.5 Flash via LangChain
-- Context-aware recommendations based on student transcript
-- Fully responsive Material Design UI
-- Comprehensive test coverage (98+ tests)
-- Hybrid retrieval combining BM25 and semantic search with embeddings
-
 ## Quick Start
 
 ### Prerequisites
@@ -26,19 +14,31 @@ This system provides 24/7 support to WPI Business School students by offering:
 ### Automatic Start (Recommended)
 
 ```bash
-# Clone/extract the project
-cd MIS520
+# Change to project directory
+cd AI-Adviser
 
 # Make scripts executable (first time only)
 chmod +x start.sh stop.sh
 
-# Start both services
+# Start both services (backend + frontend)
 ./start.sh
 
 # Stop both services when done
 ./stop.sh
 ```
 
+### Optional: local backend venv (manual)
+
+If you prefer to run the backend manually inside a virtual environment instead of using `./start.sh`, create and activate a venv and install backend requirements:
+
+```bash
+# from project root
+python3 -m venv backend/venv
+source backend/venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r backend/requirements.txt
+python -m uvicorn app.main:app --reload
+```
 ### Manual Start
 
 **Terminal 1: Backend**
@@ -66,7 +66,7 @@ npm start
 ## Project Structure
 
 ```
-MIS520/
+AI-Adviser/
 ├── frontend/                           # Angular 15 application
 │   ├── src/app/
 │   │   ├── components/pdf-upload/     # PDF upload component (30 tests)
@@ -99,7 +99,7 @@ MIS520/
 │   ├── .env.example                   # Environment template
 │   └── pytest.ini                     # Test configuration
 │
-├── database/                           # Database structure ✨NEW
+├── database/                           # Database structure NEW
 │   ├── models/                        # SQLAlchemy models
 │   ├── migrations/                    # Database migrations
 │   ├── backups/                       # Database backups (gitignored)
@@ -121,11 +121,11 @@ MIS520/
 ├── API_CONTRACT.md                    # API specifications
 ├── BACKEND_ROADMAP.md                 # Backend architecture guide
 │
-├── CoT_Implementation_Guide.md        # Chain of Thought guide ✨NEW
-├── CoT_Implementation_Summary.md      # CoT summary ✨NEW
-├── RAG_Performance_Improvement_Analysis.md  # RAG improvements ✨NEW
-├── Project_Cleanup_Summary.md         # Project cleanup ✨NEW
-└── Emoji_Cleanup_Summary.md           # Emoji removal summary ✨NEW
+├── CoT_Implementation_Guide.md        # Chain of Thought guide NEW
+├── CoT_Implementation_Summary.md      # CoT summary NEW
+├── RAG_Performance_Improvement_Analysis.md  # RAG improvements NEW
+├── Project_Cleanup_Summary.md         # Project cleanup NEW
+└── Emoji_Cleanup_Summary.md           # Emoji removal summary NEW
 ```
 
 ## Frontend Features
@@ -149,10 +149,15 @@ MIS520/
 - Auto-scroll to latest message
 
 **Technology Stack**
-- Angular 15 with strict TypeScript
-- Angular Material Design
-- RxJS for reactive programming
-- SCSS with responsive media queries
+- Frontend: Angular + TypeScript
+- Backend: FastAPI + Python
+- Agent framework: LangChain (with Google GenAI / Gemini integrations)
+- Vector DB (optional): Chroma
+- Embeddings: Sentence-Transformers
+- Keyword retrieval: Rank-BM25
+- ORM: SQLAlchemy
+- Testing: Pytest (backend), Jasmine/Karma (frontend)
+- Package managers: pip (backend), npm (frontend)
 
 ## Backend Features
 
@@ -248,19 +253,6 @@ Tools (Agent Capabilities):
   }
 }
 ```
-
-**Technology Stack**
-- FastAPI (modern, fast Python framework)
-- LangChain (agent orchestration and chain management)
-- LangChain Google GenAI (Gemini integration)
-- Chroma (vector database for semantic search)
-- Sentence Transformers (embeddings model: all-MiniLM-L6-v2)
-- Rank-BM25 (keyword-based relevance scoring)
-- Pydantic for data validation
-- Google Generative AI SDK (vision API for PDF extraction)
-- SQLAlchemy for database models
-- Pytest for testing with 45+ tests
-- Python 3.8+
 
 **Advanced Features**
 - Agentic RAG with ReAct pattern (reasoning and acting)
@@ -484,33 +476,6 @@ docker run -p 8000:8000 -e GOOGLE_API_KEY=xxx wpi-chatbot:latest
     - Ensemble retriever weights
     - Performance comparison
 
-### Folder-Specific Documentation
-11. **backend/app/agents/README.md** - Agent implementation details (new)
-12. **backend/app/chains/README.md** - Chain implementation details (new)
-13. **database/README.md** - Database structure and usage guide
-
-## Technology Stack Summary
-
-| Component | Technology | Version | Purpose |
-|-----------|-----------|---------|---------|
-| Frontend | Angular | 15.2.10 | Web UI framework |
-| UI Library | Angular Material | 15.2.9 | Material Design |
-| Language (Frontend) | TypeScript | 4.9 | Type-safe frontend |
-| Backend | FastAPI | 0.104.1 | API framework |
-| Language (Backend) | Python | 3.8+ | Backend logic |
-| Agent Framework | LangChain | 0.1.11 | Agent orchestration |
-| LangChain Integration | langchain-google-genai | 0.0.10 | Gemini integration |
-| LLM | Google Gemini | 2.5 Flash | Language model |
-| Vector Database | Chroma | 0.4.22 | Semantic search |
-| Embeddings | Sentence Transformers | 2.2.2 | Text embeddings |
-| Keyword Search | Rank-BM25 | 0.2.2 | BM25 retrieval |
-| RAG | Hybrid (BM25 + Semantic) | LangChain | Ensemble retrieval |
-| Database ORM | SQLAlchemy | 2.0.23 | Data persistence |
-| Testing (Frontend) | Jasmine + Karma | 4.5 / 6.4 | Unit tests |
-| Testing (Backend) | Pytest | 7.4.3 | Python tests |
-| Package Manager (Frontend) | NPM | 9.2.0 | Node packages |
-| Package Manager (Backend) | Pip | Latest | Python packages |
-
 ## Development Team
 
 - **Frontend**: Angular 15 with Material Design
@@ -519,93 +484,6 @@ docker run -p 8000:8000 -e GOOGLE_API_KEY=xxx wpi-chatbot:latest
 - **Documentation**: Complete guides and examples
 
 ## Support & Issues
-
-For issues or questions:
-
-1. Check relevant documentation file
-2. Review test guides for debugging
-3. Check API_CONTRACT.md for API issues
-4. Review error messages in logs (frontend.log, backend.log)
-
-## License
-
-This project is part of WPI Business School.
-
-## Recent Improvements
-
-**LangChain Agentic RAG - November 2025**
-- Implemented LangChain-based agent framework
-- ReAct (Reasoning and Acting) pattern for autonomous reasoning
-- Created adviser agent with multi-step decision-making
-- Hybrid RAG combining BM25 and semantic search
-- Tool-based knowledge retrieval system
-- Ensemble retriever for improved relevance ranking
-
-**RAG Optimization - November 2025**
-- Hybrid retrieval combining keyword and semantic search
-- BM25 implementation for fast keyword matching
-- Semantic search with Chroma vector database
-- Sentence Transformers embeddings (all-MiniLM-L6-v2)
-- 50-50 weighted ensemble for balanced results
-- Improved context relevance and ranking
-
-**File Structure Reorganization - November 2025**
-- New agents/ directory for LangChain agent implementations
-- New chains/ directory for processing pipeline chains
-- Separated tools, agents, and chains for modularity
-- Enhanced backend architecture for scalability
-- Cleaner separation of concerns
-
-**Documentation Updates - November 2025**
-- Updated README with LangChain architecture
-- Removed emoji indicators throughout documentation
-- Technology stack updated with all LangChain components
-- New documentation structure for agentic RAG
-- Configuration examples for hybrid retrieval
-
-## Future Enhancements
-
-**Phase 1: RAG Improvements (High Priority)**
-- [ ] Add semantic search with embeddings
-- [ ] Implement vector database (ChromaDB)
-- [ ] Hybrid search (BM25 + semantic)
-- [ ] Document chunking strategy
-- [ ] Reranking with cross-encoder
-
-**Phase 2: Advanced Features**
-- [ ] Multi-language support
-- [ ] Integration with WPI registration system
-- [ ] Advanced analytics dashboard
-- [ ] Mobile app (React Native)
-- [ ] Voice interface
-
-**Phase 3: Scaling & Performance**
-- [ ] Multi-user sessions with authentication
-- [ ] Custom LLM fine-tuning
-- [ ] Persistent database storage
-- [ ] Advanced caching strategies
-- [ ] Rate limiting and quotas
-
----
-
-## Key Features Summary
-
-| Feature | Status | Performance |
-|---------|--------|-------------|
-| **Chain of Thought** | ✅ Production | +15-25% accuracy |
-| **RAG System** | ✅ Production | 40-50% retrieval accuracy |
-| **PDF Extraction** | ✅ Production | 95%+ success rate |
-| **Context Caching** | ✅ Production | 60min TTL |
-| **Rule-based Responses** | ✅ Production | <1ms response |
-| **Semantic Search** | 🔄 Planned | Phase 1 roadmap |
-| **Vector Database** | 🔄 Planned | Phase 1 roadmap |
-| **Hybrid Search** | 🔄 Planned | Phase 2 roadmap |
-
----
-
-**Last Updated**: October 29, 2025
-**Version**: 1.2.0
-**Status**: Production Ready with Advanced Features
 
 **Quick Commands**:
 ```bash

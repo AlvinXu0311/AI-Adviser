@@ -14,6 +14,19 @@ import logging
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+# Startup diagnostics: log which Python executable is running and whether redis is importable
+try:
+    import sys
+    logger.info(f"Python executable: {sys.executable}")
+    try:
+        import redis as _redis
+        logger.info(f"redis package available: version={getattr(_redis, '__version__', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"redis import test failed at startup: {e}")
+except Exception:
+    # Non-fatal - diagnostics only
+    pass
+
 load_dotenv()
 
 app = FastAPI(
