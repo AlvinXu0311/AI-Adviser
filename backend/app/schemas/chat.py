@@ -1,4 +1,12 @@
 from pydantic import BaseModel, Field
+try:
+    # pydantic v2
+    from pydantic import model_validator
+    _PYDANTIC_V2 = True
+except Exception:
+    # pydantic v1
+    from pydantic import root_validator
+    _PYDANTIC_V2 = False
 from typing import Optional, List
 from enum import Enum
 
@@ -36,6 +44,32 @@ class IntentClassification(BaseModel):
         default="llm",
         description="Suggested response type: 'llm', 'rule_based', or 'hybrid'"
     )
+
+    # If the classifier returns a non-specific intent (OTHER), we force
+    # downstream behavior to ask the user for clarification.
+    if _PYDANTIC_V2:
+        @model_validator(mode="after")
+        def require_clarification_for_other(cls, model):
+            """Pydantic v2: modify the instantiated model after validation."""
+            try:
+                intent = getattr(model, "intent", None)
+            except Exception:
+                intent = None
+            if intent == IntentType.OTHER:
+                setattr(model, "requires_transcript", False)
+                setattr(model, "rule_applicable", False)
+                setattr(model, "suggested_response_type", "clarify")
+            return model
+    else:
+        @root_validator(skip_on_failure=True)
+        def require_clarification_for_other(cls, values):
+            """Pydantic v1: operate on the values dict."""
+            intent = values.get("intent")
+            if intent == IntentType.OTHER:
+                values.setdefault("requires_transcript", False)
+                values.setdefault("rule_applicable", False)
+                values["suggested_response_type"] = "clarify"
+            return values
 
 
 class TranscriptContext(BaseModel):

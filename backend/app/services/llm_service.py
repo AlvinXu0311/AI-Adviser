@@ -56,14 +56,14 @@ class LLMService:
         """
         base_prompt = """You are an academic advisor for WPI Business School.
 
-🎯 CRITICAL INSTRUCTION - ANSWER ONLY WHAT IS ASKED:
+CRITICAL INSTRUCTION - ANSWER ONLY WHAT IS ASKED:
 Do NOT add unsolicited commentary, suggestions, or advice.
 Do NOT discuss grades unless asked about specific grades.
 Do NOT provide tips or strategies unless explicitly requested.
 Do NOT add "notes" or "observations" about performance.
 Do NOT provide general advice alongside the answer.
 
-🚫 ANTI-HALLUCINATION RULES (MANDATORY):
+ANTI-HALLUCINATION RULES (MANDATORY):
 1. ONLY use information from the "Program Information" section provided below
 2. If information is NOT in the provided context, say "I don't have that information in my knowledge base"
 3. DO NOT make up course names, codes, requirements, or program details
@@ -194,6 +194,40 @@ RESPONSE GUIDELINES:
                 return True
 
         return False
+
+    def _is_progress_question(self, message: str) -> bool:
+        """
+        Detect if the user is asking about their academic progress/graduation.
+
+        Args:
+            message: User's message
+
+        Returns:
+            True if message requests progress/graduation status
+        """
+        if not message:
+            return False
+
+        message_lower = message.lower()
+        progress_indicators = [
+            "progress",
+            "process",
+            "how am i doing",
+            "how am i",
+            "current progress",
+            "what's my progress",
+            "what is my progress",
+            "am i on track",
+            "what's left",
+            "remaining requirements",
+            "what's left for graduation",
+            "what's left to graduate",
+            "graduation status",
+            "how close to graduation",
+            "degree progress",
+        ]
+
+        return any(indicator in message_lower for indicator in progress_indicators)
 
     def _assess_query_complexity(self, message: str) -> str:
         """
@@ -329,6 +363,23 @@ RESPONSE GUIDELINES:
             if self._is_vague_question(message):
                 clarifying_instruction = "\n\nIMPORTANT: This question is vague. Ask the student to clarify what specific help they need."
                 system_prompt += clarifying_instruction
+
+            # If user explicitly asks about progress/graduation, instruct the LLM
+            # to provide structured details: required, completed, current, remaining.
+            if self._is_progress_question(message):
+                progress_instruction = """
+
+PROGRESS DETAIL GUIDELINES:
+- If the student asks about progress or graduation, include these short sections (headings + concise bullets):
+  1) Required / Program Requirements: List the core required courses or total credits needed (from program info).
+  2) Completed: List required courses the student has completed (use transcript data).
+  3) In Progress / Current: List courses currently in progress (use transcript data).
+  4) Remaining / To Graduate: List remaining required courses or approximate credits left; if exact details are missing, say "I don't have that information in my knowledge base".
+- Use only the data present in the provided transcript and program information; DO NOT infer or fabricate course codes, names, or requirements.
+- Keep each section short (1-4 bullets) and end with total credits remaining if known.
+
+"""
+                system_prompt += progress_instruction
 
             # Detect student's program from context
             program_id = self._detect_program_from_context(context)
