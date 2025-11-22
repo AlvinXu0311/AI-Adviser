@@ -1,11 +1,8 @@
-"""
-Academic Adviser Agent using LangChain with ReAct pattern.
-Autonomous agent that handles student queries through intelligent reasoning and tool use.
-"""
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.callbacks.base import AsyncCallbackHandler
 import logging
 import os
 
@@ -38,7 +35,8 @@ class AdviserAgent:
             model="gemini-2.5-flash",
             temperature=0.7,
             max_output_tokens=2048,
-            google_api_key=api_key
+            google_api_key=api_key,
+            streaming=True
         )
 
         # Initialize RAG agent for knowledge retrieval
@@ -156,7 +154,10 @@ Thought:{agent_scratchpad}"""
         self,
         query: str,
         context: Optional[Any] = None,  # Can be ExtractedTranscriptData or TranscriptContext
-        program_id: str = "msit"
+        program_id: str = "msit",
+        callbacks: Optional[List[AsyncCallbackHandler]] = None,
+        session_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
         Process a student query using agentic chat with RAG support.
@@ -165,12 +166,25 @@ Thought:{agent_scratchpad}"""
             query: Student's question
             context: Optional transcript context (ExtractedTranscriptData from PDF or TranscriptContext from API)
             program_id: Program identifier (msit, msba, msm)
+            callbacks: Optional list of async callback handlers for streaming
 
         Returns:
             Dict with response, reasoning, and tools used
         """
         try:
             logger.info(f"Processing query with adviser agent: {query[:50]}...")
+
+            # Build conversation context from history if provided
+            conversation_context = ""
+            if conversation_history and len(conversation_history) > 0:
+                context_parts = ["### CONVERSATION HISTORY (use this to understand context):"]
+                # Include up to last 10 messages for context
+                for msg in conversation_history[-10:]:
+                    role = msg.get('role', 'unknown').upper()
+                    content = msg.get('content', '')[:300]  # Limit message size
+                    context_parts.append(f"{role}: {content}")
+                conversation_context = "\n".join(context_parts) + "\n\n"
+                logger.info(f"Including conversation history with {len(conversation_history)} messages for session {session_id}")
 
             # Check if this is a program/course question that MUST use RAG
             query_lower = query.lower()
@@ -224,12 +238,12 @@ Thought:{agent_scratchpad}"""
             else:
                 logger.info("No transcript context provided - user must upload PDF for personalized info")
 
-            # Format input with context information
-            input_text = self._format_agent_input(query_with_context, context, program_id)
+            # Format input with context information and conversation history
+            input_text = self._format_agent_input(query_with_context, context, program_id, conversation_context)
 
             # Execute agent
             logger.info("Executing Chat Agent with ReAct pattern...")
-            result = await self.agent_executor.ainvoke({"input": input_text})
+            result = await self.agent_executor.ainvoke({"input": input_text}, {"callbacks": callbacks})
 
             response = result.get("output", "")
 
@@ -271,12 +285,19 @@ Thought:{agent_scratchpad}"""
         self,
         query: str,
         context: Optional[Any] = None,
-        program_id: str = "msit"
+        program_id: str = "msit",
+        conversation_context: str = ""
     ) -> str:
         """Format the input for the agent, handling both TranscriptContext and ExtractedTranscriptData"""
         from ..schemas.transcript import ExtractedTranscriptData
 
-        input_text = f"Student Question: {query}\n"
+        input_text = ""
+
+        # Add conversation history if available
+        if conversation_context:
+            input_text += conversation_context
+
+        input_text += f"Student Question: {query}\n"
 
         if context:
             input_text += f"\nStudent Context:\n"

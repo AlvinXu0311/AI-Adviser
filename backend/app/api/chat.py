@@ -4,7 +4,10 @@ Uses ReAct agent pattern with autonomous tool use for knowledge retrieval.
 Supports multi-turn conversation with memory management.
 """
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 import logging
+import asyncio
+from asyncio import create_task
 from ..schemas.chat import ChatRequest, ChatResponse, IntentType
 from ..agents.adviser_agent import get_adviser_agent
 from ..chains.rag_chain import get_rag_chain
@@ -12,6 +15,7 @@ from ..chains.chat_chain import get_chat_chain
 from ..services.context_manager import get_context_manager
 from ..services.conversation_memory import get_conversation_memory, generate_session_id
 from ..utils.error_handler import handle_llm_error
+from ..agents.streaming_callback import StreamingCallbackHandler
 
 logger = logging.getLogger(__name__)
 
@@ -48,128 +52,104 @@ def get_chat():
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest) -> StreamingResponse:
     """
-    Process a chat message using LangChain agentic RAG with ReAct pattern.
+    Process a chat message using LangChain agentic RAG with ReAct pattern and stream the response.
 
     Flow:
     1. Generate or use existing session ID for conversation memory
     2. Store user message in conversation history
     3. Use agentic RAG (adviser agent) for autonomous tool-based reasoning
     4. Agent uses RAG retrieval and context lookup tools
-    5. Store assistant response in conversation history
-    6. Return response with source metadata and session ID
+    5. Stream intermediate steps (thoughts, actions) and final response
+    6. Store assistant response in conversation history
+    7. Return streaming response with source metadata and session ID
 
     Args:
         request: ChatRequest containing message, optional transcript context, and optional session_id
 
     Returns:
-        ChatResponse with generated message, response source, and session info
+        StreamingResponse with generated message, response source, and session info
     """
-    logger.info(f"Chat request received via LangChain: '{request.message[:50]}...'")
+    logger.info(f"Streaming chat request received: '{request.message[:50]}...'")
+    
+    async def stream_generator():
+        queue = asyncio.Queue()
+        handler = StreamingCallbackHandler(queue)
 
-    try:
-        # Validate input
-        if not request.message or len(request.message.strip()) == 0:
-            error_msg = "Message cannot be empty"
-            logger.warning(error_msg)
-            raise ValueError(error_msg)
+        async def agent_task():
+            try:
+                # Validate input
+                if not request.message or len(request.message.strip()) == 0:
+                    raise ValueError("Message cannot be empty")
 
-        if len(request.message) > 5000:
-            error_msg = "Message exceeds maximum length of 5000 characters"
-            logger.warning(error_msg)
-            raise ValueError(error_msg)
+                if len(request.message) > 5000:
+                    raise ValueError("Message exceeds maximum length of 5000 characters")
 
-        logger.debug(f"Input validation passed. Message length: {len(request.message)}")
+                # Handle session ID and conversation memory
+                session_id = request.session_id or generate_session_id()
+                memory = get_conversation_memory()
+                memory.add_user_message(session_id, request.message)
 
-        # Handle session ID and conversation memory
-        session_id = request.session_id or generate_session_id()
-        memory = get_conversation_memory()
-        memory.add_user_message(session_id, request.message)
-        logger.info(f"Session: {session_id}, stored user message")
+                # Get cached student context
+                context_manager = get_context_manager()
+                cached_context = context_manager.get_student_context()
 
-        # Get cached student context from ContextManager (full transcript data from PDF)
-        context_manager = get_context_manager()
-        cached_context = context_manager.get_student_context()
+                student_context_to_use = None
+                if cached_context:
+                    student_context_to_use = cached_context
+                elif request.transcript_context:
+                    from ..schemas.transcript import ExtractedTranscriptData, ProgramInfo
+                    student_context_to_use = ExtractedTranscriptData(
+                        student_name=request.transcript_context.student_name,
+                        student_id=request.transcript_context.student_name or "N/A",
+                        gpa=request.transcript_context.gpa,
+                        program_info=ProgramInfo(program_name=request.transcript_context.program) if request.transcript_context.program else None,
+                        completed_courses=[],
+                        current_courses=[]
+                    )
 
-        # Determine which context to use: cached (from PDF) or request context (from API)
-        student_context_to_use = None
-        context_source = "none"
+                # Get conversation history for context
+                conversation_history = memory.get_messages(session_id)
+                # Convert to dict format for agent
+                history_dicts = []
+                from langchain_core.messages import HumanMessage, AIMessage
+                for msg in conversation_history:
+                    if isinstance(msg, HumanMessage):
+                        history_dicts.append({"role": "user", "content": msg.content})
+                    elif isinstance(msg, AIMessage):
+                        history_dicts.append({"role": "assistant", "content": msg.content})
 
-        if cached_context:
-            # Use full cached context from PDF extraction (has student_id, courses, grades, etc.)
-            logger.info("Using complete cached student context from PDF extraction")
-            logger.info(f"Cached context: {cached_context.student_name}, ID: {cached_context.student_id}, GPA: {cached_context.gpa}")
-            logger.info(f"Completed courses: {len(cached_context.completed_courses) if cached_context.completed_courses else 0}")
-            logger.info(f"Current courses: {len(cached_context.current_courses) if cached_context.current_courses else 0}")
-            student_context_to_use = cached_context
-            context_source = "cached_pdf"
-        elif request.transcript_context:
-            # Use request context if no cached context
-            logger.info("Using student context from API request")
-            # Convert to ExtractedTranscriptData for consistency
-            from ..schemas.transcript import ExtractedTranscriptData, ProgramInfo
-            student_context_to_use = ExtractedTranscriptData(
-                student_name=request.transcript_context.student_name,
-                student_id=request.transcript_context.student_name or "N/A",  # Fallback
-                gpa=request.transcript_context.gpa,
-                program_info=ProgramInfo(program_name=request.transcript_context.program) if request.transcript_context.program else None,
-                completed_courses=[],
-                current_courses=[]
-            )
-            context_source = "api_request"
-        else:
-            logger.info("No student context available (PDF not uploaded, no context in request)")
-            context_source = "none"
+                agent = get_agent()
+                result = await agent.answer_query(
+                    query=request.message,
+                    context=student_context_to_use,
+                    program_id="msit",
+                    callbacks=[handler],
+                    session_id=session_id,
+                    conversation_history=history_dicts
+                )
+                
+                response_text = result.get("response", "")
+                memory.add_ai_message(session_id, response_text)
 
-        # Use LangChain agentic RAG for response
-        logger.info(f"Processing with LangChain agentic RAG (ReAct agent), context_source={context_source}")
+            except Exception as e:
+                logger.error(f"Error in agent task: {e}", exc_info=True)
+                await queue.put(f"data: {{\"type\": \"error\", \"content\": \"{str(e)}\"}}\n\n")
+            finally:
+                await queue.put(None)
 
-        agent = get_agent()
-        result = await agent.answer_query(
-            query=request.message,
-            context=student_context_to_use,
-            program_id="msit"
-        )
+        task = create_task(agent_task())
 
-        response_text = result.get("response", "")
-        response_source = result.get("source", "agentic_rag")
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield f"data: {item}\n\n"
+        
+        await task
 
-        # Store assistant response in conversation memory
-        memory.add_ai_message(session_id, response_text)
-        logger.info(f"Session: {session_id}, stored assistant response")
-
-        # Create a default intent classification for response
-        from ..schemas.chat import IntentClassification
-        intent_classification = IntentClassification(
-            intent=IntentType.GENERAL_ACADEMIC,
-            confidence=0.85,
-            requires_transcript=request.transcript_context is not None,
-            rule_applicable=False,
-            suggested_response_type="llm"
-        )
-
-        logger.info(f"LangChain response generated: {len(response_text)} chars, source: {response_source}")
-
-        # Return response with session ID for client to use in follow-up messages
-        response = ChatResponse(
-            response=response_text,
-            intent=intent_classification,
-            response_source=response_source
-        )
-
-        # Store session_id in response metadata by adding custom header
-        logger.debug(f"Returning response with session_id: {session_id}")
-        return response
-
-    except ValueError as e:
-        error_detail = f"Validation error: {str(e)}"
-        logger.error(f"Validation error: {error_detail}")
-        raise HTTPException(status_code=400, detail=error_detail)
-    except Exception as e:
-        logger.error(f"Unexpected error in chat endpoint: {str(e)}", exc_info=True)
-        http_exception = handle_llm_error(e)
-        raise http_exception
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
 
 @router.get("/chat/history/{session_id}")
