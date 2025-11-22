@@ -17,11 +17,13 @@ import { MatDialogModule } from '@angular/material/dialog';
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { PdfUploadComponent } from './components/pdf-upload/pdf-upload.component';
+import { FormatAnswerPipe } from './format-answer.pipe';
 
 @NgModule({
   declarations: [
     AppComponent,
     PdfUploadComponent,
+    FormatAnswerPipe,
   ],
   imports: [
     BrowserModule,

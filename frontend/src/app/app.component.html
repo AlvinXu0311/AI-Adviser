@@ -1,79 +1,144 @@
 <div class="app-container">
-  <mat-toolbar color="primary" class="header">
-    <h1>WPI Business School Assistant</h1>
-    <span class="spacer"></span>
-    <button
-      mat-icon-button
-      *ngIf="transcriptData"
-      (click)="togglePdfUpload()"
-      [attr.aria-label]="showPdfUpload ? 'Hide PDF upload' : 'Show PDF upload'"
-    >
-      <mat-icon>{{ showPdfUpload ? 'expand_less' : 'expand_more' }}</mat-icon>
-    </button>
-  </mat-toolbar>
+  <!-- Modern Header -->
+  <header class="header">
+    <div class="header-content">
+      <div class="header-brand">
+        <mat-icon class="brand-icon">school</mat-icon>
+        <h1>WPI Business School Assistant</h1>
+      </div>
+      <div class="header-spacer"></div>
+      <button
+        mat-icon-button
+        *ngIf="transcriptData"
+        (click)="togglePdfUpload()"
+        [attr.aria-label]="showPdfUpload ? 'Hide PDF upload' : 'Show PDF upload'"
+        class="header-action-btn"
+        [attr.data-tooltip]="showPdfUpload ? 'Hide upload' : 'Show upload'"
+      >
+        <mat-icon class="action-icon">{{ showPdfUpload ? 'expand_less' : 'expand_more' }}</mat-icon>
+      </button>
+    </div>
+  </header>
 
   <div class="main-content">
     <!-- PDF Upload Section -->
-    <div *ngIf="showPdfUpload" class="pdf-upload-section">
+    <div *ngIf="showPdfUpload" class="pdf-upload-section slide-in">
+      <div class="upload-header">
+        <h2>Your Academic Profile</h2>
+        <p class="upload-subtitle">Upload your transcript to get personalized guidance</p>
+      </div>
       <app-pdf-upload (transcriptLoaded)="onTranscriptLoaded($event)"></app-pdf-upload>
     </div>
 
     <!-- Chat Section -->
     <div class="chat-section">
       <div class="messages-container" #scrollContainer>
-        <div class="welcome-message" *ngIf="messages.length === 0">
-          <h2>Welcome to WPI Business School Assistant</h2>
-          <p *ngIf="!transcriptData">
-            Upload your academic transcript to get started. I can help you with:
-          </p>
-          <p *ngIf="transcriptData">
-            Great! Now I have your academic information. I can help you with:
-          </p>
-          <ul>
-            <li>Information about WPI Business School programs</li>
-            <li>Course requirements and recommendations</li>
-            <li>Academic progress tracking and analysis</li>
-            <li>Elective and prerequisite guidance</li>
-            <li>Career path advice</li>
-          </ul>
-          <p class="hint">Try: "What are the requirements for the MS in Business Analytics?"</p>
+        <!-- Welcome Message -->
+        <div class="welcome-message fade-in" *ngIf="messages.length === 0">
+          <div class="welcome-content">
+            <div class="welcome-icon">
+              <mat-icon>auto_awesome</mat-icon>
+            </div>
+            <h2>Welcome to Your AI Academic Advisor</h2>
+            <p class="welcome-subtitle" *ngIf="!transcriptData">
+              Start by uploading your academic transcript
+            </p>
+            <p class="welcome-subtitle" *ngIf="transcriptData">
+              Ready to help you succeed
+            </p>
+
+            <div class="features-grid">
+              <div class="feature-card">
+                <mat-icon>school</mat-icon>
+                <span>Program Info</span>
+              </div>
+              <div class="feature-card">
+                <mat-icon>trending_up</mat-icon>
+                <span>Progress Tracking</span>
+              </div>
+              <div class="feature-card">
+                <mat-icon>quiz</mat-icon>
+                <span>Course Guidance</span>
+              </div>
+              <div class="feature-card">
+                <mat-icon>career_center</mat-icon>
+                <span>Career Path</span>
+              </div>
+            </div>
+
+            <div class="suggestion-box">
+              <mat-icon class="suggestion-icon">lightbulb</mat-icon>
+              <p class="suggestion-text">Try: "What are the requirements for the MS in Business Analytics?"</p>
+            </div>
+          </div>
         </div>
 
-        <mat-card *ngFor="let message of messages" [ngClass]="{'user-message': message.isUser, 'bot-message': !message.isUser}" class="message-card">
-          <mat-card-content>
+        <!-- History Toggle Button -->
+        <div class="history-toggle-container" *ngIf="shouldShowHistoryToggle && !showHistory">
+          <button class="history-toggle-btn" (click)="toggleHistory()">
+            <mat-icon>history</mat-icon>
+            <span>View earlier messages ({{ hiddenMessageCount }})</span>
+            <mat-icon class="expand-icon">expand_more</mat-icon>
+          </button>
+        </div>
+
+        <!-- Collapse History Button -->
+        <div class="history-collapse-container" *ngIf="showHistory && shouldShowHistoryToggle">
+          <button class="history-collapse-btn" (click)="toggleHistory()">
+            <mat-icon>expand_less</mat-icon>
+            <span>Hide earlier messages</span>
+          </button>
+        </div>
+
+        <!-- Messages -->
+        <div
+          *ngFor="let message of displayMessages"
+          [ngClass]="{'user-message': message.isUser, 'bot-message': !message.isUser}"
+          class="message-wrapper slide-up"
+        >
+          <div class="message-card">
             <div class="message-avatar" *ngIf="!message.isUser">
               <mat-icon>smart_toy</mat-icon>
             </div>
             <div class="message-content-wrapper">
-              <div class="message-content">{{ message.text }}</div>
+              <div class="message-bubble">
+                <div class="message-content">
+                  <mat-spinner *ngIf="message.thinking" diameter="18" class="thinking-spinner"></mat-spinner>
+                  <div class="message-text" [innerHTML]="message.text | formatAnswer"></div>
+                </div>
+              </div>
               <div class="message-timestamp">{{ message.timestamp | date:'short' }}</div>
             </div>
-          </mat-card-content>
-        </mat-card>
+          </div>
+        </div>
       </div>
 
+      <!-- Input Area -->
       <div class="input-container">
-        <mat-form-field appearance="outline" class="message-input">
-          <mat-label>Ask about programs, courses, or your academic progress...</mat-label>
-          <input
-            matInput
-            [(ngModel)]="messageText"
-            placeholder="Type your message here..."
-            [disabled]="loading"
-            (keyup.enter)="sendMessage()"
-          />
-        </mat-form-field>
-        <button
-          mat-raised-button
-          color="primary"
-          (click)="sendMessage()"
-          [disabled]="loading || !messageText.trim()"
-          class="send-btn"
-        >
-          <mat-icon *ngIf="!loading">send</mat-icon>
-          <mat-spinner *ngIf="loading" diameter="20"></mat-spinner>
-          <span>{{ loading ? 'Sending...' : 'Send' }}</span>
-        </button>
+        <div class="input-wrapper">
+          <mat-form-field appearance="outline" class="message-input">
+            <mat-label>Ask me anything...</mat-label>
+            <input
+              matInput
+              [(ngModel)]="messageText"
+              placeholder="Type your question here..."
+              [disabled]="loading"
+              (keyup.enter)="sendMessage()"
+              class="chat-input"
+            />
+          </mat-form-field>
+          <button
+            mat-icon-button
+            color="primary"
+            (click)="sendMessage()"
+            [disabled]="loading || !messageText.trim()"
+            class="send-btn-icon"
+            [attr.aria-label]="'Send message'"
+          >
+            <mat-icon *ngIf="!loading">send</mat-icon>
+            <mat-spinner *ngIf="loading" diameter="20" class="send-spinner"></mat-spinner>
+          </button>
+        </div>
       </div>
     </div>
   </div>
