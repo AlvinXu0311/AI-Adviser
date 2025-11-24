@@ -19,16 +19,18 @@ PIDFILE=".chatbot_pids"
 # Check if PID file exists
 if [ ! -f "$PIDFILE" ]; then
     echo -e "${YELLOW}No process ID file found${NC}"
-    echo "Attempting to kill processes on ports 4200 and 8000..."
+    echo "Attempting to kill processes on ports 5173/5174 and 8000..."
 
     # Try to kill processes on specific ports
     if command -v lsof &> /dev/null; then
-        # Kill process on port 4200 (Frontend)
-        FRONTEND_PID=$(lsof -ti :4200)
-        if [ ! -z "$FRONTEND_PID" ]; then
-            kill -9 $FRONTEND_PID 2>/dev/null
-                echo -e "${GREEN}Stopped Frontend (PID: $FRONTEND_PID)${NC}"
-        fi
+        # Kill processes on Vite dev server ports (5173, 5174 fallback)
+        for PORT in 5173 5174; do
+            FRONTEND_PID=$(lsof -ti :$PORT)
+            if [ ! -z "$FRONTEND_PID" ]; then
+                kill -9 $FRONTEND_PID 2>/dev/null
+                echo -e "${GREEN}Stopped Frontend (port $PORT, PID: $FRONTEND_PID)${NC}"
+            fi
+        done
 
         # Kill process on port 8000 (Backend)
         BACKEND_PID=$(lsof -ti :8000)
@@ -43,7 +45,7 @@ if [ ! -f "$PIDFILE" ]; then
             echo "Found processes, attempting to kill..."
             # Try pkill if available
             if command -v pkill &> /dev/null; then
-                pkill -f "ng serve" 2>/dev/null
+                pkill -f "vite" 2>/dev/null
                 pkill -f "uvicorn" 2>/dev/null
                 echo -e "${GREEN}Killed processes${NC}"
             fi
@@ -74,6 +76,6 @@ echo "================================"
 echo -e "${GREEN}Services Stopped${NC}"
 echo "================================"
 echo ""
-echo "Port 4200 (Frontend):  Available"
+echo "Port 5173 (Frontend):  Available"
 echo "Port 8000 (Backend):   Available"
 echo ""

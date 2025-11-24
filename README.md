@@ -54,12 +54,12 @@ python -m uvicorn app.main:app --reload
 ```bash
 cd frontend
 npm install
-npm start
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 ### Access the Application
 
-- **Frontend**: http://localhost:4200
+- **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
@@ -67,13 +67,12 @@ npm start
 
 ```
 AI-Adviser/
-├── frontend/                           # Angular 15 application
-│   ├── src/app/
-│   │   ├── components/pdf-upload/     # PDF upload component (30 tests)
-│   │   ├── services/                  # Chat & PDF services
-│   │   └── app.component.ts           # Main app (23 tests)
-│   ├── package.json                   # Dependencies
-│   └── README.md                       # Frontend documentation
+├── frontend/                           # React (Vite) application
+│   ├── components/                    # ChatInterface, MessageBubble, InputArea
+│   ├── services/                      # API clients (chat + transcript)
+│   ├── App.tsx                        # Application shell
+│   ├── vite.config.ts                 # Vite tooling config
+│   └── package.json                   # Frontend dependencies
 │
 ├── backend/                            # FastAPI application with LangChain
 │   ├── app/
@@ -131,7 +130,7 @@ AI-Adviser/
 ## Frontend Features
 
 **User Interface**
-- Professional Material Design with gradient theme
+- Modern React UI with gradient branding and utility-first styling
 - Responsive layout (desktop, tablet, mobile)
 - Real-time message updates with auto-scroll
 - Loading indicators and progress tracking
@@ -149,14 +148,14 @@ AI-Adviser/
 - Auto-scroll to latest message
 
 **Technology Stack**
-- Frontend: Angular + TypeScript
+- Frontend: React (Vite) + TypeScript
 - Backend: FastAPI + Python
 - Agent framework: LangChain (with Google GenAI / Gemini integrations)
 - Vector DB (optional): Chroma
 - Embeddings: Sentence-Transformers
 - Keyword retrieval: Rank-BM25
 - ORM: SQLAlchemy
-- Testing: Pytest (backend), Jasmine/Karma (frontend)
+- Testing: Pytest (backend), Vitest/React Testing Library (frontend)
 - Package managers: pip (backend), npm (frontend)
 
 ## Backend Features
@@ -305,7 +304,7 @@ RAG_TOP_K=5                   # Number of top results to retrieve
 CHROMA_PERSIST_DIR=/tmp/chroma_db
 
 # Server Configuration
-FRONTEND_URL=http://localhost:4200
+FRONTEND_URL=http://localhost:5173,http://localhost:5174
 LOG_LEVEL=INFO
 ```
 
@@ -313,12 +312,12 @@ LOG_LEVEL=INFO
 
 Backend API URL is automatically set:
 - Frontend: `http://localhost:8000/api` (in services)
-- Backend CORS: Configured to allow `http://localhost:4200`
+- Backend CORS: Configured to allow `http://localhost:5173` (and 5174 fallback)
 
 ### Customization
 
 **Change Port Numbers**
-- Frontend: Edit `angular.json` (port 4200)
+- Frontend: Update `vite.config.ts` or the `npm run dev` arguments (default 5173)
 - Backend: Edit start.sh or run with `--port XXXX`
 
 **Change API URL**
@@ -364,8 +363,11 @@ curl http://localhost:8000/api/health
 ### Port Already in Use
 
 ```bash
-# Kill process on port 4200
-lsof -ti :4200 | xargs kill -9
+# Kill process on port 5173 (React dev server)
+lsof -ti :5173 | xargs kill -9
+
+# Optional fallback if Vite auto-switched ports
+lsof -ti :5174 | xargs kill -9
 
 # Kill process on port 8000
 lsof -ti :8000 | xargs kill -9
@@ -478,7 +480,7 @@ docker run -p 8000:8000 -e GOOGLE_API_KEY=xxx wpi-chatbot:latest
 
 ## Development Team
 
-- **Frontend**: Angular 15 with Material Design
+- **Frontend**: React (Vite) SPA with modern component styling
 - **Backend**: FastAPI with Python
 - **Testing**: Comprehensive test suites (98+ tests)
 - **Documentation**: Complete guides and examples
@@ -494,9 +496,3 @@ pytest                        # Run backend tests
 python database/scripts/init_db.py    # Initialize database
 bash database/scripts/backup_db.sh    # Backup database
 ```
-
-**New Documentation**:
-- CoT_Implementation_Guide.md - Chain of Thought comprehensive guide
-- RAG_Performance_Improvement_Analysis.md - RAG improvement roadmap
-- Project_Cleanup_Summary.md - Organization improvements
-- Emoji_Cleanup_Summary.md - Logging standardization

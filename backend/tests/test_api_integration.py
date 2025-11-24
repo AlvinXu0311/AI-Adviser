@@ -240,7 +240,7 @@ class TestCORSHeaders:
             "/api/chat",
             json={"message": "Test"},
             headers={
-                "Origin": "http://localhost:4200",
+                "Origin": "http://localhost:5173",
                 "Access-Control-Request-Method": "POST"
             }
         )
@@ -253,7 +253,7 @@ class TestCORSHeaders:
         response = client.options(
             "/api/chat",
             headers={
-                "Origin": "http://localhost:4200",
+                "Origin": "http://localhost:5173",
                 "Access-Control-Request-Method": "POST"
             }
         )

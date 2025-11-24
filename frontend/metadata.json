@@ -1,0 +1,5 @@
+{
+  "name": "WPI Digital Adviser",
+  "description": "A modern, interactive chatbot for WPI Business School utilizing Agentic RAG and LLM technologies.",
+  "requestFramePermissions": []
+}

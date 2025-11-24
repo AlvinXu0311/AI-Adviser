@@ -19,6 +19,7 @@ __pycache__/
 .Python
 env/
 venv/
+backend/venv/
 ENV/
 build/
 develop-eggs/
@@ -76,6 +77,9 @@ dmypy.json
 # Logs
 *.log
 logs/
+backend.log
+frontend.log
+.chatbot_pids
 
 # Database
 *.db
@@ -153,4 +157,5 @@ database/backups/*.dump
 .claude/
 .venv/
 frontend/.vscode
-.chatbot_pids
+.python-version
+.ruff_cache/

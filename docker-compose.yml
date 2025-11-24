@@ -60,8 +60,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "4200:4200"
-    command: ["/bin/sh", "-c", "npm ci && npm run start -- --host 0.0.0.0"]
+      - "5173:5173"
+    command: ["/bin/sh", "-c", "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"]
     environment:
       - CHOKIDAR_USEPOLLING=true
     restart: unless-stopped

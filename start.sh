@@ -74,7 +74,7 @@ cd "$REPO_ROOT" || exit 1
 
 # Start Frontend
 echo ""
-echo "Starting Frontend (Angular on port 4200)..."
+echo "Starting Frontend (React/Vite on port 5173)..."
 cd frontend
 
 # Check if dependencies are installed
@@ -83,8 +83,8 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-# Start frontend in background
-npm start > "../frontend.log" 2>&1 &
+# Start frontend in background (Vite dev server)
+npm run dev -- --host 0.0.0.0 --port 5173 > "../frontend.log" 2>&1 &
 FRONTEND_PID=$!
 
 # Give it a moment to start (frontend takes longer to compile)
@@ -107,7 +107,7 @@ echo -e "${GREEN}Services Started Successfully${NC}"
 echo "================================"
 echo ""
 echo "Access Points:"
-echo "  Frontend:  http://localhost:4200"
+echo "  Frontend:  http://localhost:5173"
 echo "  Backend:   http://localhost:8000"
 echo "  API Docs:  http://localhost:8000/docs"
 echo "  Health:    http://localhost:8000/api/health"

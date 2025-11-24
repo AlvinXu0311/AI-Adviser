@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.chat import router as chat_router
 from .api.transcript import router as transcript_router
+from .api.status import router as status_router
 from dotenv import load_dotenv
 import os
 import logging
@@ -35,8 +36,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
-allowed_origins = os.getenv("FRONTEND_URL", "http://localhost:4200").split(",")
+# Configure CORS for Vite dev server (5173/5174) and legacy Angular fallback
+default_frontend_origins = "http://localhost:5173,http://localhost:5174,http://localhost:4200"
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_URL", default_frontend_origins).split(",")
+    if origin.strip()
+]
+logger.info(f"Allowed CORS origins: {allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Angular frontend URL (configurable via env)
@@ -69,6 +76,7 @@ else:
 # Include routers
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(transcript_router, prefix="/api", tags=["transcript"])
+app.include_router(status_router, prefix="/api", tags=["status"])
 
 
 @app.get("/", tags=["health"])

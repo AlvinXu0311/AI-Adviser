@@ -1,40 +1,24 @@
 {
-  "name": "frontend",
-  "version": "0.0.0",
-  "scripts": {
-    "ng": "ng",
-    "start": "ng serve",
-    "build": "ng build",
-    "watch": "ng build --watch --configuration development",
-    "test": "ng test"
-  },
+  "name": "wpi-digital-adviser",
   "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
-    "@angular/animations": "^15.2.0",
-    "@angular/cdk": "^15.2.9",
-    "@angular/common": "^15.2.0",
-    "@angular/compiler": "^15.2.0",
-    "@angular/core": "^15.2.0",
-    "@angular/forms": "^15.2.0",
-    "@angular/material": "^15.2.9",
-    "@angular/platform-browser": "^15.2.0",
-    "@angular/platform-browser-dynamic": "^15.2.0",
-    "@angular/router": "^15.2.0",
-    "rxjs": "~7.8.0",
-    "tslib": "^2.3.0",
-    "zone.js": "~0.12.0"
+    "lucide-react": "^0.554.0",
+    "framer-motion": "^12.23.24",
+    "react-dom": "^19.2.0",
+    "react": "^19.2.0",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^15.2.11",
-    "@angular/cli": "~15.2.11",
-    "@angular/compiler-cli": "^15.2.0",
-    "@types/jasmine": "~4.3.0",
-    "jasmine-core": "~4.5.0",
-    "karma": "~6.4.0",
-    "karma-chrome-launcher": "~3.1.0",
-    "karma-coverage": "~2.2.0",
-    "karma-jasmine": "~5.1.0",
-    "karma-jasmine-html-reporter": "~2.0.0",
-    "typescript": "~4.9.4"
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
   }
 }

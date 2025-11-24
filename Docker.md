@@ -8,7 +8,7 @@ Quick start (from repo root):
 # Build and start backend + redis (foreground)
 docker compose up --build
 
-This compose now runs a full development stack: `frontend` (Angular dev server), `backend` (FastAPI), `redis` and `db` (Postgres). It also includes an `init_db` one-shot job to initialize the Postgres schema using `database/scripts/init_db.py`.
+This compose now runs a full development stack: `frontend` (React/Vite dev server), `backend` (FastAPI), `redis` and `db` (Postgres). It also includes an `init_db` one-shot job to initialize the Postgres schema using `database/scripts/init_db.py`.
 
 Important: the `backend` service is configured to use `DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/mis520` by default — change credentials via environment or an override file for production.
 
@@ -44,7 +44,7 @@ Frontend:
 cd frontend
 npm ci
 cp .env.example .env # if exists
-npm start
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 Run full stack with Docker (recommended for reproducible dev):
@@ -75,7 +75,7 @@ curl http://localhost:8000/health
 # Memory stats (should show redis_connected)
 curl http://localhost:8000/api/chat/memory/stats
 
-# Frontend (Angular dev): http://localhost:4200
+# Frontend (React dev): http://localhost:5173
 ```
 
 Environment variables:
