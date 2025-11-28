@@ -7,48 +7,83 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 import logging
 import asyncio
+import json
 from asyncio import create_task
-from ..schemas.chat import ChatRequest, ChatResponse, IntentType
-from ..agents.adviser_agent import get_adviser_agent
-from ..chains.rag_chain import get_rag_chain
-from ..chains.chat_chain import get_chat_chain
+from ..schemas.chat import ChatRequest, ChatResponse
 from ..services.context_manager import get_context_manager
 from ..services.conversation_memory import get_conversation_memory, generate_session_id
-from ..utils.error_handler import handle_llm_error
-from ..agents.streaming_callback import StreamingCallbackHandler
+from ..agents.adviser_agent import get_adviser_agent
+from langchain.callbacks.base import AsyncCallbackHandler
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Lazy initialization - services created on first request, not at module load
 _adviser_agent = None
-_rag_chain = None
-_chat_chain = None
+
+
+def validate_query_basic_sanity(message: str) -> tuple[bool, str]:
+    """
+    Basic sanity check to prevent completely empty or garbage input.
+    Does NOT reject multi-turn responses or short answers.
+
+    Intent classification with Redis memory context will handle meaningfulness assessment.
+
+    Returns:
+        (is_valid, error_message): True if input is not garbage, False with error message if it is
+    """
+    msg = message.strip()
+
+    # Check 1: Empty message
+    if not msg:
+        return False, "Message cannot be empty."
+
+    # Check 2: Only special characters/punctuation (no alphanumeric)
+    if not any(c.isalnum() for c in msg):
+        return False, "Please provide a valid question or response."
+
+    return True, ""
 
 
 def get_agent():
-    """Get or create AdviserAgent (lazy initialization)"""
     global _adviser_agent
     if _adviser_agent is None:
         _adviser_agent = get_adviser_agent()
     return _adviser_agent
 
 
-def get_rag():
-    """Get or create RAG chain (lazy initialization)"""
-    global _rag_chain
-    if _rag_chain is None:
-        _rag_chain = get_rag_chain()
-    return _rag_chain
+class StreamingCallbackHandler(AsyncCallbackHandler):
+    """Custom callback handler for streaming agent output"""
 
+    def __init__(self, queue: asyncio.Queue):
+        self.queue = queue
 
-def get_chat():
-    """Get or create Chat chain (lazy initialization)"""
-    global _chat_chain
-    if _chat_chain is None:
-        _chat_chain = get_chat_chain()
-    return _chat_chain
+    async def on_agent_action(self, action, **kwargs) -> None:
+        """Called when agent takes an action (uses a tool)"""
+        logger.debug(f"Agent action: {action.tool}")
+        await self.queue.put(json.dumps({
+            "type": "agent_action",
+            "tool": action.tool,
+            "input": str(action.tool_input)
+        }))
+
+    async def on_tool_start(self, serialized, input_str, **kwargs) -> None:
+        """Called when a tool starts"""
+        tool_name = serialized.get("name", "unknown")
+        logger.debug(f"Tool started: {tool_name}")
+        await self.queue.put(json.dumps({
+            "type": "tool_start",
+            "tool_name": tool_name,
+            "input": input_str
+        }))
+
+    async def on_tool_end(self, output, **kwargs) -> None:
+        """Called when a tool ends"""
+        logger.debug(f"Tool ended with output: {str(output)[:100]}")
+        await self.queue.put(json.dumps({
+            "type": "tool_end",
+            "output": str(output)[:500]  # Limit output length
+        }))
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -75,30 +110,60 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     
     async def stream_generator():
         queue = asyncio.Queue()
-        handler = StreamingCallbackHandler(queue)
 
         async def agent_task():
             try:
                 # Validate input
+                logger.debug("Starting agent_task")
                 if not request.message or len(request.message.strip()) == 0:
                     raise ValueError("Message cannot be empty")
 
                 if len(request.message) > 5000:
                     raise ValueError("Message exceeds maximum length of 5000 characters")
 
+                # Layer 1: Basic sanity check - only reject completely empty/garbage input
+                logger.debug("Layer 1: Validating basic input sanity")
+                is_valid, error_msg = validate_query_basic_sanity(request.message)
+                if not is_valid:
+                    logger.info(f"Query rejected at Layer 1 sanity check: '{request.message}'")
+                    session_id = generate_session_id()
+                    await queue.put(json.dumps({
+                        "type": "final",
+                        "content": error_msg,
+                        "response_source": "input_validation",
+                        "reasoning": "Input failed basic sanity check",
+                        "tools_used": ["sanity_check"],
+                        "intent": None,
+                        "session_id": session_id,
+                    }))
+                    await queue.put(None)
+                    return
+
                 # Handle session ID and conversation memory
+                logger.debug("Generating session ID")
                 session_id = request.session_id or generate_session_id()
+                logger.debug("Getting conversation memory")
                 memory = get_conversation_memory()
+                logger.debug("Adding user message to memory")
                 memory.add_user_message(session_id, request.message)
+                logger.debug("User message added successfully")
+
+                # Get topic context
+                logger.debug(f"Chat topic_id: {request.topic_id}")
+                topic_id = request.topic_id  # 'general' or 'course'
+                logger.info(f"User selected topic: {topic_id or 'not specified'}")
 
                 # Get cached student context
+                logger.debug("Getting context manager")
                 context_manager = get_context_manager()
+                logger.debug("Getting student context")
                 cached_context = context_manager.get_student_context()
 
                 student_context_to_use = None
                 if cached_context:
                     student_context_to_use = cached_context
                 elif request.transcript_context:
+                    logger.debug("Building student context from transcript")
                     from ..schemas.transcript import ExtractedTranscriptData, ProgramInfo
                     student_context_to_use = ExtractedTranscriptData(
                         student_name=request.transcript_context.student_name,
@@ -110,32 +175,77 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     )
 
                 # Get conversation history for context
-                conversation_history = memory.get_messages(session_id)
-                # Convert to dict format for agent
-                history_dicts = []
-                from langchain_core.messages import HumanMessage, AIMessage
-                for msg in conversation_history:
-                    if isinstance(msg, HumanMessage):
-                        history_dicts.append({"role": "user", "content": msg.content})
-                    elif isinstance(msg, AIMessage):
-                        history_dicts.append({"role": "assistant", "content": msg.content})
+                logger.debug("Getting conversation history")
+                from ..services.conversation_memory import get_history as get_conversation_history
+                conversation_history = get_conversation_history(session_id)
 
-                agent = get_agent()
-                result = await agent.answer_query(
+                # Step 1: Intent Classification (with conversation history for context)
+                logger.debug("Step 1: Classifying user intent")
+                from ..agents.intent_agent import get_intent_agent
+                intent_agent = get_intent_agent()
+                intent_classification = await intent_agent.classify(request.message, conversation_history)
+                logger.info(f"Intent detected: {intent_classification.intent} (confidence: {intent_classification.confidence}, is_academic: {intent_classification.is_academic})")
+
+                # Layer 2: Intent validation - reject non-academic or low confidence queries
+                logger.debug("Layer 2: Checking intent classification")
+                CONFIDENCE_THRESHOLD = 0.2
+
+                if not intent_classification.is_academic or intent_classification.confidence < CONFIDENCE_THRESHOLD:
+                    logger.info(f"Query rejected at Layer 2: is_academic={intent_classification.is_academic}, confidence={intent_classification.confidence}")
+                    response_text = ("I'm not sure how to help with that. Could you provide more context? "
+                                   "For example: 'Tell me about MSIT program' or 'What are the requirements for specializations?'")
+
+                    payload = {
+                        "type": "final",
+                        "content": response_text,
+                        "response_source": "intent_classification",
+                        "reasoning": f"Query not academic or low confidence (is_academic: {intent_classification.is_academic}, confidence: {intent_classification.confidence})",
+                        "tools_used": ["intent_classification"],
+                        "intent": intent_classification.model_dump() if intent_classification else None,
+                        "session_id": session_id,
+                    }
+                    await queue.put(json.dumps(payload))
+                    await queue.put(None)
+                    return
+
+                # Log confidence level for debugging
+                logger.info(f"Intent classification passed. Proceeding to adviser agent.")
+
+                # Step 2: Route to RAG Agent based on intent
+                logger.debug("Step 2: Routing to RAG agent")
+                adviser_agent = get_agent()
+                streaming_callback = StreamingCallbackHandler(queue)
+
+                # Call RAG agent with intent context
+                logger.debug("Step 3: Calling RAG agent with intent context")
+                result = await adviser_agent.answer_query(
                     query=request.message,
                     context=student_context_to_use,
-                    program_id="msit",
-                    callbacks=[handler],
+                    program_id="msit",  # Default program, could be parameterized
+                    callbacks=[streaming_callback],
                     session_id=session_id,
-                    conversation_history=history_dicts
+                    conversation_history=conversation_history,
+                    topic_id=topic_id  # Pass selected topic
                 )
-                
+
                 response_text = result.get("response", "")
+                logger.debug("RAG agent response generated")
                 memory.add_ai_message(session_id, response_text)
+
+                payload = {
+                    "type": "final",
+                    "content": response_text,
+                    "response_source": result.get("source", "agentic_rag"),
+                    "reasoning": result.get("reasoning", ""),
+                    "tools_used": result.get("tools_used", []),
+                    "intent": intent_classification.model_dump() if intent_classification else None,
+                    "session_id": session_id,
+                }
+                await queue.put(json.dumps(payload))
 
             except Exception as e:
                 logger.error(f"Error in agent task: {e}", exc_info=True)
-                await queue.put(f"data: {{\"type\": \"error\", \"content\": \"{str(e)}\"}}\n\n")
+                await queue.put(json.dumps({"type": "error", "content": str(e)}))
             finally:
                 await queue.put(None)
 

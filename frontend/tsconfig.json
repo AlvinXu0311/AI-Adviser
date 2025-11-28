@@ -14,7 +14,8 @@
     "skipLibCheck": true,
     "types": [
       "node",
-      "react"
+      "react",
+      "vite/client"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

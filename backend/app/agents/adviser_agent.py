@@ -7,7 +7,7 @@ import logging
 import os
 
 from ..schemas.chat import TranscriptContext
-from .tools import get_all_tools
+from .tools import get_all_tools, business_school_db_tool
 from ..services.context_manager import get_context_manager
 
 logger = logging.getLogger(__name__)
@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 class AdviserAgent:
     """
     Chat Agent using LangChain's ReAct pattern for conversational advising.
-    Uses RAG Agent for knowledge retrieval and maintains conversation flow.
+    Database-First architecture with direct SQLite queries.
     Handles academic advising with autonomous decision-making and tool use.
 
     Architecture:
-    - Chat Agent: Handles conversation logic and user interaction
-    - RAG Agent: Retrieves program information from knowledge base
-    - Tools: rag_search (via RAG Agent), student_context, complexity_assessment
+    - ReAct Pattern: Reasoning + Acting with tool use
+    - Database-First: Direct SQLite queries via business_school_database tool
+    - Tools: business_school_database, student_context, assess_complexity
     """
 
     def __init__(self):
@@ -32,22 +32,22 @@ class AdviserAgent:
             raise ValueError("GOOGLE_API_KEY environment variable is required")
 
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-pro",
             temperature=0.7,
             max_output_tokens=2048,
             google_api_key=api_key,
             streaming=True
         )
 
-        # Initialize RAG agent for knowledge retrieval
-        from .rag_agent import get_rag_agent
-        self.rag_agent = get_rag_agent()
+        # DEPRECATED: RAG Agent no longer used - Database-First architecture
+        # from .rag_agent import get_rag_agent
+        # self.rag_agent = get_rag_agent()
 
         self.tools = get_all_tools()
 
         # Improved system prompt for agentic reasoning
         self.system_prompt = """You are an expert Academic Adviser for WPI Business School.
-Your expertise: Programs (MSIT, MSBA, MSM), course requirements, specializations, and student academic planning.
+    Your expertise: Programs (MSIT, MSBA, MSM), course requirements, specializations, student academic planning, and the official Business School SQLite database.
 
 CORE RESPONSIBILITIES:
 1. Answer student questions about degree programs, requirements, and courses
@@ -58,22 +58,25 @@ CORE RESPONSIBILITIES:
 MANDATORY TOOL USAGE (ReAct Pattern):
 You MUST use tools for every question. Here's what to do:
 
-Program/Course Questions (MUST use rag_search):
-- "What is MSIT?" → Use rag_search
-- "What are the courses?" → Use rag_search
-- "What are requirements?" → Use rag_search
-- "What specializations?" → Use rag_search
+Program/Course Questions (MUST use business_school_database):
+- "What is MSIT?" → Use business_school_database
+- "What are the courses?" → Use business_school_database
+- "What are requirements?" → Use business_school_database
+- "What specializations?" → Use business_school_database
 
 Personal Progress Questions (use student_context):
 - "What's my GPA?" → Use student_context
 - "What courses did I take?" → Use student_context
 
+Complexity Assessment:
+- When uncertain about query type → Use assess_complexity
+
 CRITICAL RULES:
-- NEVER answer "I don't have information" without using rag_search first
+- NEVER answer "I don't have information" without using business_school_database first
 - ONLY use tool-provided data - never invent course codes, credits, or requirements
-- Always say what tool you used: "According to our knowledge base..."
+- Always cite your source: "According to the Business School database..." or "Based on your transcript..."
 - Be concise (2-3 sentences max unless detailed explanation needed)
-- If tools return nothing, explicitly say: "I don't have that in the knowledge base"
+- If tools return nothing, explicitly say: "I don't have that in the database"
 - For personal questions without transcript: suggest uploading a PDF"""
 
         self.agent_executor = self._create_agent()
@@ -85,53 +88,75 @@ CRITICAL RULES:
 SYSTEM CONTEXT:
 You help students with program information, course planning, and academic guidance.
 You have access to:
-- Knowledge base of 3 programs (MSIT, MSBA, MSM) with courses and requirements
+- Business School SQLite database (AUTHORITATIVE source for program/specialty/course information)
 - Student transcript cache (if they uploaded their PDF)
-- Query complexity assessment tool
+- Assessment tools for query complexity
 
-MANDATORY TOOL USAGE (ReAct Pattern):
+DATABASE-FIRST ARCHITECTURE:
+The SQLite database is your PRIMARY and ONLY source for accurate program/course data.
+All data queries MUST go through the business_school_database tool.
+
+MANDATORY TOOL USAGE (ReAct Pattern - Database First):
 You MUST use tools for EVERY question. Follow this process:
 
-1. IDENTIFY QUESTION TYPE:
-   - "program/course/specialization/requirement/graduation/prerequisite" → MUST use rag_search FIRST
-   - "my GPA/transcript/progress/grades/courses" → use student_context
-   - Anything uncertain → use assess_complexity then rag_search
+1. IDENTIFY QUESTION TYPE & RESOLVE PRONOUNS:
+    - Always look at conversation history to understand pronouns like "they", "these", "those"
+    - "program/course/specialization/requirement/graduation/prerequisite" → MUST use business_school_database FIRST
+    - "my GPA/transcript/progress/grades/courses" + pronouns referring to courses → use student_context
+    - "What are they?" / "Tell me more" in multi-turn → resolve from conversation history, then use appropriate tool
+    - Anything uncertain → use assess_complexity then business_school_database
 
 2. USE TOOLS (REQUIRED):
-   For program/course questions: ALWAYS call rag_search with the user's question
+   For personal progress questions (GPA, completed courses, current courses):
+   - ALWAYS call student_context to get actual student data
+   Example: User asks "what courses have I completed?" or "what are they?"
+   → You MUST respond: Action: student_context
+                        Action Input: courses
+
+   For program/database questions:
+   - ALWAYS call business_school_database with the user's question
    Example: User says "What are MSIT requirements?"
-   → You MUST respond: Action: rag_search
+   → You MUST respond: Action: business_school_database
                         Action Input: What are MSIT requirements?
 
 3. RESPOND ONLY WITH TOOL DATA:
-   - Quote course codes, credits, and specialization names directly from tool results
-   - If tool returns no results, say "I don't have that information in the knowledge base"
-   - Never answer from general knowledge about WPI
+    - Quote course codes, credits, and specialization names directly from tool results
+    - Always cite source: "According to your transcript..." or "According to the Business School database..."
+    - If tools return nothing, explicitly say: "I don't have that information available"
+    - Never answer from general knowledge about WPI
 
 CRITICAL RULES (VIOLATIONS = WRONG ANSWER):
-- If user asks about programs/courses/requirements → rag_search is MANDATORY
-- NEVER answer "I don't have information" if you haven't used rag_search yet
+- If user asks about their personal courses → student_context is MANDATORY
+- If user asks about programs/requirements → business_school_database is MANDATORY
+- NEVER answer "I don't have information" without trying the appropriate tool first
 - NEVER invent course codes, credits, or requirements
-- Always cite source: "According to our knowledge base..."
+- Always cite your source when answering
+- Resolve pronouns by looking at conversation history before taking action
 
 You have access to the following tools:
 
 {tools}
 
-Use the following format:
+Tool names: {tool_names}
+
+IMPORTANT: You MUST strictly follow this format for EVERY response:
 
 Question: the input question you must answer
-Thought: I need to identify what information to retrieve
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-Thought: I now have the information needed to answer accurately
-Final Answer: the final answer to the original input question
+Thought: I need to [your reasoning here]
+Action: [one of: {tool_names}]
+Action Input: [input for the tool]
+Observation: [tool result - this will be provided]
+... (repeat Thought/Action/Action Input/Observation as needed)
+Thought: I now have the information needed to answer
+Final Answer: [your complete response to the user]
+
+NEVER skip the "Action:" line after a "Thought:" line unless you are giving the Final Answer.
 
 Begin!
 
 Question: {input}
-Thought:{agent_scratchpad}"""
+Thought: Let me help with this question
+{agent_scratchpad}"""
 
         from langchain.prompts import PromptTemplate as LP
         prompt = LP(
@@ -146,7 +171,7 @@ Thought:{agent_scratchpad}"""
             verbose=False,  # Disabled verbose stdout callback to avoid callback errors
             max_iterations=5,  # Reduced from 10 to prevent looping
             early_stopping_method="force",
-            handle_parsing_errors=True  # Allow agent to recover from parsing errors
+            handle_parsing_errors="Check your output format. You must follow this exact format:\nThought: [your reasoning]\nAction: [tool name]\nAction Input: [input]\n\nOR if you have the final answer:\nThought: [your reasoning]\nFinal Answer: [your response]"
         )
         return executor
 
@@ -158,6 +183,7 @@ Thought:{agent_scratchpad}"""
         callbacks: Optional[List[AsyncCallbackHandler]] = None,
         session_id: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        topic_id: Optional[str] = None,  # Selected advising topic: 'general' or 'course'
     ) -> Dict[str, Any]:
         """
         Process a student query using agentic chat with RAG support.
@@ -173,6 +199,23 @@ Thought:{agent_scratchpad}"""
         """
         try:
             logger.info(f"Processing query with adviser agent: {query[:50]}...")
+            logger.info(f"Topic context: {topic_id or 'not specified'}")
+
+            # Note: No Layer 3 hardcoded validation here anymore
+            # Intent classification with Redis memory context already handles query meaningfulness
+            # Short multi-turn responses (like "MSBA", "courses") are valid given conversation history
+            logger.debug(f"Processing query (conversation history: {len(conversation_history) if conversation_history else 0} messages)")
+
+            # Build topic-specific guidance
+            topic_guidance = ""
+            if topic_id == "general":
+                topic_guidance = "\n[CONTEXT] User selected: General Advising - Focus on program overview, policies, degree requirements, specialization options."
+                logger.info("Using General Advising topic guidance")
+            elif topic_id == "course":
+                topic_guidance = "\n[CONTEXT] User selected: Courses & Planning - Focus on course schedules, catalog details, prerequisites, course selection."
+                logger.info("Using Courses & Planning topic guidance")
+            else:
+                logger.info("No specific topic selected, using general guidance")
 
             # Build conversation context from history if provided
             conversation_context = ""
@@ -186,25 +229,30 @@ Thought:{agent_scratchpad}"""
                 conversation_context = "\n".join(context_parts) + "\n\n"
                 logger.info(f"Including conversation history with {len(conversation_history)} messages for session {session_id}")
 
-            # Check if this is a program/course question that MUST use RAG
+            # Check if this is a program/course question that MUST use DATABASE
             query_lower = query.lower()
             program_keywords = ['msit', 'msba', 'msm', 'course', 'requirement', 'specialization',
                                'graduation', 'prerequisite', 'program', 'core', 'degree', 'major']
             is_program_question = any(kw in query_lower for kw in program_keywords)
 
             if is_program_question:
-                logger.info("Detected program/course question - USING RAG for knowledge retrieval")
-                # For program questions, directly use RAG to ensure knowledge base is queried
-                from .rag_agent import get_rag_agent
-                rag_agent = get_rag_agent()
-                rag_result = await rag_agent.retrieve_for_query(query, program_id=program_id, top_k=8)
-                rag_context = rag_result.get("context", "")
-
-                if rag_context:
-                    logger.info(f"RAG retrieved {len(rag_context)} chars of context for program question")
-                    # Inject RAG context into the query to guide the agent
-                    query_with_context = f"{query}\n\n[Knowledge Base Information Available]:\n{rag_context}"
-                else:
+                logger.info("Detected program/course question - USING DATABASE TOOL for authoritative data")
+                # For program questions, directly use database tool to ensure accurate data
+                try:
+                    db_summary = business_school_db_tool(query)
+                    if db_summary and db_summary.strip():
+                        query_with_context = (
+                            f"{query}\n\n[Business School Database Information]:\n{db_summary}"
+                        )
+                        logger.info(
+                            "Business School database summary injected (%d chars)",
+                            len(db_summary),
+                        )
+                    else:
+                        query_with_context = query
+                        logger.info("Database returned no results for program question")
+                except Exception as db_err:
+                    logger.error("Failed to fetch Business School database summary: %s", db_err)
                     query_with_context = query
             else:
                 query_with_context = query
@@ -238,8 +286,8 @@ Thought:{agent_scratchpad}"""
             else:
                 logger.info("No transcript context provided - user must upload PDF for personalized info")
 
-            # Format input with context information and conversation history
-            input_text = self._format_agent_input(query_with_context, context, program_id, conversation_context)
+            # Format input with context information, conversation history, and topic guidance
+            input_text = self._format_agent_input(query_with_context, context, program_id, conversation_context, topic_guidance)
 
             # Execute agent
             logger.info("Executing Chat Agent with ReAct pattern...")
@@ -256,9 +304,9 @@ Thought:{agent_scratchpad}"""
 
             return {
                 "response": response,
-                "reasoning": "Chat Agent used ReAct pattern with tool use for knowledge retrieval",
-                "tools_used": ["rag_search", "student_context", "assess_complexity"],
-                "source": "agentic_rag",
+                "reasoning": "Chat Agent used ReAct pattern with database-first tool use",
+                "tools_used": ["business_school_database", "student_context", "assess_complexity"],
+                "source": "database_first",
                 "has_transcript": context is not None
             }
 
@@ -286,7 +334,8 @@ Thought:{agent_scratchpad}"""
         query: str,
         context: Optional[Any] = None,
         program_id: str = "msit",
-        conversation_context: str = ""
+        conversation_context: str = "",
+        topic_guidance: str = ""
     ) -> str:
         """Format the input for the agent, handling both TranscriptContext and ExtractedTranscriptData"""
         from ..schemas.transcript import ExtractedTranscriptData
@@ -296,6 +345,10 @@ Thought:{agent_scratchpad}"""
         # Add conversation history if available
         if conversation_context:
             input_text += conversation_context
+
+        # Add topic guidance if available
+        if topic_guidance:
+            input_text += topic_guidance + "\n"
 
         input_text += f"Student Question: {query}\n"
 

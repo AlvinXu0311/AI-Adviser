@@ -1,0 +1,5 @@
+AI-Adviser Public URLs
+Fri Nov 28 02:10:20 AM EST 2025
+
+Frontend: https://americas-guy-advisor-digital.trycloudflare.com
+Backend:  https://three-cruises-florida-certified.trycloudflare.com

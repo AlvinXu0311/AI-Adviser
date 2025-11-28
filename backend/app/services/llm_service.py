@@ -7,7 +7,8 @@ import os
 from typing import Optional
 from ..schemas.chat import TranscriptContext
 from .context_manager import get_context_manager
-from .rag_service import get_rag_service
+# DEPRECATED: RAG service no longer used - Database-First architecture
+# from .rag_service import get_rag_service
 
 
 class LLMService:
@@ -381,47 +382,14 @@ PROGRESS DETAIL GUIDELINES:
 """
                 system_prompt += progress_instruction
 
-            # Detect student's program from context
-            program_id = self._detect_program_from_context(context)
+            # DEPRECATED: RAG retrieval no longer used - Database-First architecture
+            # Program queries are now handled by the adviser_agent using database tool
+            # program_id = self._detect_program_from_context(context)
+            # program_rag_context = self._get_program_context_from_rag(message, program_id, force_retrieval=True)
+            # has_rag_context = program_rag_context is not None
 
-            # ALWAYS MANDATORY: Use RAG for EVERY question to ensure precision
-            print(f"[RAG] 🔒 RAG is ALWAYS MANDATORY for maximum precision")
-            program_rag_context = self._get_program_context_from_rag(message, program_id, force_retrieval=True)
-            has_rag_context = program_rag_context is not None
-
-            if program_rag_context:
-                # Add RAG context to system prompt with VERY STRONG emphasis
-                system_prompt += f"""
-
-{'='*80}
-📚 OFFICIAL WPI PROGRAM INFORMATION FROM KNOWLEDGE BASE
-{'='*80}
-
-{program_rag_context}
-
-{'='*80}
-
-🔴 CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. The information above is the OFFICIAL program information
-2. You MUST use this information to answer the student's question
-3. DO NOT say "I don't have information" when the answer is RIGHT ABOVE
-4. The student is asking about their program - use the knowledge base above
-5. If the information is in the knowledge base above, USE IT in your answer
-6. Only say "I don't have that information" if it's truly NOT in the knowledge base
-
-Example:
-- Student asks: "What courses should I take?"
-- Knowledge base has: Core courses, specializations, requirements
-- CORRECT: List the courses from the knowledge base above
-- WRONG: "I don't have that information" (when it's right there!)
-{'='*80}
-"""
-                print(f"[LLM] ✅ RAG context injected ({len(program_rag_context)} chars)")
-                print(f"[LLM] 📝 Preview of RAG context: {program_rag_context[:200]}...")
-            else:
-                # Even if no specific context found, remind LLM to be factual
-                system_prompt += "\n\n⚠️ NO PROGRAM INFORMATION FOUND: If the question requires program/course information that isn't in your context, you MUST say 'I don't have that information in my knowledge base.'\n"
-                print(f"[LLM] ⚠️  No RAG context retrieved, but anti-hallucination rules active")
+            # Set has_rag_context to False for Database-First approach
+            has_rag_context = False
 
             # Get generation config and complexity assessment
             generation_config = self._get_generation_config(message, has_rag_context)
@@ -579,123 +547,125 @@ Think through which information is most relevant to answer this question accurat
         print(f"[LLM] Unknown program '{context.program}', defaulting to MSIT")
         return "msit"
 
-    def _get_program_context_from_rag(self, message: str, program_id: str = "msit", force_retrieval: bool = False) -> Optional[str]:
-        """
-        Check if question is program-related and retrieve context from RAG.
-        Can be forced to ALWAYS retrieve for maximum precision.
-
-        Args:
-            message: User's question
-            program_id: Program ID to search (msit, msba, msm)
-            force_retrieval: If True, always attempts retrieval regardless of question type
-
-        Returns:
-            RAG context if relevant found, None otherwise
-        """
-        # Expanded keywords that indicate program-related questions
-        program_keywords = [
-            # Course related
-            "course", "courses", "class", "classes",
-            # Requirements
-            "requirement", "requirements", "need", "needs", "needed",
-            "must", "should take", "have to take",
-            # Program structure
-            "program", "specialization", "concentration", "track",
-            "credits", "credit", "credit hours",
-            "capstone", "core", "foundation",
-            "elective", "electives", "optional",
-            # Course codes (expanded)
-            "mis5", "mis4", "mkt5", "mkt4", "obc5", "oie5",
-            "mis ", "mkt ", "obc ", "oie ",  # with space to catch MIS581, etc
-            # Specializations
-            "data analytics", "artificial intelligence", "user experience",
-            "digital transformation", "information systems",
-            "ai", "ux", "data", "analytics", "business intelligence",
-            # Program questions
-            "graduate", "masters", "master's", "degree",
-            "curriculum", "coursework",
-            # Planning questions
-            "what should i take", "what can i take", "recommend",
-            "next semester", "plan", "schedule",
-            "which course", "what courses",
-            # Completion questions
-            "how many", "how much", "total",
-            "finish", "complete", "graduation", "graduate"
-        ]
-
-        message_lower = message.lower()
-
-        # Check if message contains program keywords
-        is_program_related = any(keyword in message_lower for keyword in program_keywords)
-
-        # Also check for question patterns that need program info
-        program_question_patterns = [
-            r"what (courses?|classes?)",
-            r"which (courses?|classes?)",
-            r"(can|should|must) i take",
-            r"requirements? (for|to)",
-            r"how many (courses?|credits?)",
-            r"tell me about.*program",
-            r"what.*specialization",
-        ]
-
-        import re
-        if not is_program_related:
-            is_program_related = any(re.search(pattern, message_lower) for pattern in program_question_patterns)
-
-        # If force_retrieval is True, ALWAYS attempt retrieval
-        if not is_program_related and not force_retrieval:
-            print(f"[RAG] Question not program-related, skipping RAG: '{message[:50]}...'")
-            return None
-
-        if force_retrieval and not is_program_related:
-            print(f"[RAG] Force retrieval enabled - attempting RAG even for non-program question")
-
-        # MANDATORY RAG retrieval
-        try:
-            if is_program_related or force_retrieval:
-                print(f"[RAG] MANDATORY retrieval: '{message[:50]}...'")
-                print(f"[RAG] Using program: {program_id.upper()}")
-                rag_service = get_rag_service()
-
-                # Use improved BM25 search with higher top_k for better coverage
-                context = rag_service.get_context_for_query(
-                    message,
-                    program_id=program_id,
-                    top_k=5,  # Increased from 3 for better coverage
-                    use_bm25=True  # Force BM25 for better ranking
-                )
-
-                if not context or len(context.strip()) < 50:
-                    print(f"[WARNING] [RAG] Retrieved context is empty or too short!")
-
-                    # If forced retrieval but nothing relevant found, provide general program overview
-                    if force_retrieval:
-                        print(f"[RAG] Providing general program overview as fallback")
-                        program_info = rag_service.retrieve_program_info(program_id)
-                        if program_info:
-                            fallback_context = f"""
-Program: {program_info.get('name')}
-Total Credits: {program_info.get('total_credits')}
-Overview: {program_info.get('overview')}
-
-Core Requirements:
-- {len(program_info.get('core_courses', []))} core courses (9 credits)
-- 2 specializations (18 credits total)
-- Capstone requirement (6 credits)
-"""
-                            return fallback_context
-
-                    # Return a fallback message
-                    return "\n\nProgram Information: [No relevant program information found in knowledge base for this query]"
-
-                print(f"[RAG] Successfully retrieved {len(context)} chars of context")
-                return context
-
-        except Exception as e:
-            print(f"[ERROR] [RAG] Error retrieving context: {str(e)}")
-            # Return error context so LLM knows to say "I don't know"
-            return "\n\nProgram Information: [Error retrieving program information from knowledge base]"
+    # DEPRECATED: RAG method no longer used - Database-First architecture
+    # The adviser_agent.py now handles all program queries using the database tool directly
+    # def _get_program_context_from_rag(self, message: str, program_id: str = "msit", force_retrieval: bool = False) -> Optional[str]:
+    #     """
+    #     Check if question is program-related and retrieve context from RAG.
+    #     Can be forced to ALWAYS retrieve for maximum precision.
+    #
+    #     Args:
+    #         message: User's question
+    #         program_id: Program ID to search (msit, msba, msm)
+    #         force_retrieval: If True, always attempts retrieval regardless of question type
+    #
+    #     Returns:
+    #         RAG context if relevant found, None otherwise
+    #     """
+    #     # Expanded keywords that indicate program-related questions
+    #     program_keywords = [
+    #         # Course related
+    #         "course", "courses", "class", "classes",
+    #         # Requirements
+    #         "requirement", "requirements", "need", "needs", "needed",
+    #         "must", "should take", "have to take",
+    #         # Program structure
+    #         "program", "specialization", "concentration", "track",
+    #         "credits", "credit", "credit hours",
+    #         "capstone", "core", "foundation",
+    #         "elective", "electives", "optional",
+    #         # Course codes (expanded)
+    #         "mis5", "mis4", "mkt5", "mkt4", "obc5", "oie5",
+    #         "mis ", "mkt ", "obc ", "oie ",  # with space to catch MIS581, etc
+    #         # Specializations
+    #         "data analytics", "artificial intelligence", "user experience",
+    #         "digital transformation", "information systems",
+    #         "ai", "ux", "data", "analytics", "business intelligence",
+    #         # Program questions
+    #         "graduate", "masters", "master's", "degree",
+    #         "curriculum", "coursework",
+    #         # Planning questions
+    #         "what should i take", "what can i take", "recommend",
+    #         "next semester", "plan", "schedule",
+    #         "which course", "what courses",
+    #         # Completion questions
+    #         "how many", "how much", "total",
+    #         "finish", "complete", "graduation", "graduate"
+    #     ]
+    #
+    #     message_lower = message.lower()
+    #
+    #     # Check if message contains program keywords
+    #     is_program_related = any(keyword in message_lower for keyword in program_keywords)
+    #
+    #     # Also check for question patterns that need program info
+    #     program_question_patterns = [
+    #         r"what (courses?|classes?)",
+    #         r"which (courses?|classes?)",
+    #         r"(can|should|must) i take",
+    #         r"requirements? (for|to)",
+    #         r"how many (courses?|credits?)",
+    #         r"tell me about.*program",
+    #         r"what.*specialization",
+    #     ]
+    #
+    #     import re
+    #     if not is_program_related:
+    #         is_program_related = any(re.search(pattern, message_lower) for pattern in program_question_patterns)
+    #
+    #     # If force_retrieval is True, ALWAYS attempt retrieval
+    #     if not is_program_related and not force_retrieval:
+    #         print(f"[RAG] Question not program-related, skipping RAG: '{message[:50]}...'")
+    #         return None
+    #
+    #     if force_retrieval and not is_program_related:
+    #         print(f"[RAG] Force retrieval enabled - attempting RAG even for non-program question")
+    #
+    #     # MANDATORY RAG retrieval
+    #     try:
+    #         if is_program_related or force_retrieval:
+    #             print(f"[RAG] MANDATORY retrieval: '{message[:50]}...'")
+    #             print(f"[RAG] Using program: {program_id.upper()}")
+    #             rag_service = get_rag_service()
+    #
+    #             # Use improved BM25 search with higher top_k for better coverage
+    #             context = rag_service.get_context_for_query(
+    #                 message,
+    #                 program_id=program_id,
+    #                 top_k=5,  # Increased from 3 for better coverage
+    #                 use_bm25=True  # Force BM25 for better ranking
+    #             )
+    #
+    #             if not context or len(context.strip()) < 50:
+    #                 print(f"[WARNING] [RAG] Retrieved context is empty or too short!")
+    #
+    #                 # If forced retrieval but nothing relevant found, provide general program overview
+    #                 if force_retrieval:
+    #                     print(f"[RAG] Providing general program overview as fallback")
+    #                     program_info = rag_service.retrieve_program_info(program_id)
+    #                     if program_info:
+    #                         fallback_context = f"""
+    # Program: {program_info.get('name')}
+    # Total Credits: {program_info.get('total_credits')}
+    # Overview: {program_info.get('overview')}
+    #
+    # Core Requirements:
+    # - {len(program_info.get('core_courses', []))} core courses (9 credits)
+    # - 2 specializations (18 credits total)
+    # - Capstone requirement (6 credits)
+    # """
+    #                         return fallback_context
+    #
+    #                 # Return a fallback message
+    #                 return "\n\nProgram Information: [No relevant program information found in knowledge base for this query]"
+    #
+    #             print(f"[RAG] Successfully retrieved {len(context)} chars of context")
+    #             return context
+    #
+    #     except Exception as e:
+    #         print(f"[ERROR] [RAG] Error retrieving context: {str(e)}")
+    #         # Return error context so LLM knows to say "I don't know"
+    #         return "\n\nProgram Information: [Error retrieving program information from knowledge base]"
 
     def _format_context_for_logging(self, context: Optional[TranscriptContext]) -> str:
         """

@@ -1,75 +1,34 @@
 from pydantic import BaseModel, Field
-try:
-    # pydantic v2
-    from pydantic import model_validator
-    _PYDANTIC_V2 = True
-except Exception:
-    # pydantic v1
-    from pydantic import root_validator
-    _PYDANTIC_V2 = False
 from typing import Optional, List
-from enum import Enum
-
-
-class IntentType(str, Enum):
-    """Enum for different intent types"""
-    COURSE_SELECTION = "course_selection"
-    PROGRAM_REQUIREMENTS = "program_requirements"
-    ACADEMIC_PROGRESS = "academic_progress"
-    CAREER_ADVICE = "career_advice"
-    PREREQUISITE = "prerequisite"
-    GPA_RELATED = "gpa_related"
-    SCHEDULE_PLANNING = "schedule_planning"
-    GENERAL_ACADEMIC = "general_academic"
-    OTHER = "other"
 
 
 class IntentClassification(BaseModel):
-    """Schema for intent classification result"""
-    intent: IntentType = Field(..., description="Primary intent of the question")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score (0-1)")
-    secondary_intents: List[IntentType] = Field(
-        default_factory=list,
-        description="Secondary intents if multiple are detected"
+    """
+    Free-form intent classification result from LLM.
+    No enum constraints - LLM decides intent description freely.
+    """
+    intent: str = Field(
+        ...,
+        description="Free-form description of user's intent (e.g., 'asking about personal transcript info', 'course requirements query')"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence that query is meaningful and answerable (0-1)"
+    )
+    is_academic: bool = Field(
+        default=True,
+        description="Whether query relates to academic advising (programs, courses, transcript, planning)"
     )
     requires_transcript: bool = Field(
         default=False,
-        description="Whether transcript context is needed for this query"
+        description="Whether answering this query requires student's uploaded transcript data"
     )
-    rule_applicable: bool = Field(
-        default=False,
-        description="Whether rule-based system can handle this query"
+    reasoning: str = Field(
+        default="",
+        description="Brief explanation of the classification decision"
     )
-    suggested_response_type: str = Field(
-        default="llm",
-        description="Suggested response type: 'llm', 'rule_based', or 'hybrid'"
-    )
-
-    # If the classifier returns a non-specific intent (OTHER), we force
-    # downstream behavior to ask the user for clarification.
-    if _PYDANTIC_V2:
-        @model_validator(mode="after")
-        def require_clarification_for_other(cls, model):
-            """Pydantic v2: modify the instantiated model after validation."""
-            try:
-                intent = getattr(model, "intent", None)
-            except Exception:
-                intent = None
-            if intent == IntentType.OTHER:
-                setattr(model, "requires_transcript", False)
-                setattr(model, "rule_applicable", False)
-                setattr(model, "suggested_response_type", "clarify")
-            return model
-    else:
-        @root_validator(skip_on_failure=True)
-        def require_clarification_for_other(cls, values):
-            """Pydantic v1: operate on the values dict."""
-            intent = values.get("intent")
-            if intent == IntentType.OTHER:
-                values.setdefault("requires_transcript", False)
-                values.setdefault("rule_applicable", False)
-                values["suggested_response_type"] = "clarify"
-            return values
 
 
 class TranscriptContext(BaseModel):
@@ -90,6 +49,10 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None,
         description="Optional session ID for conversation memory - generates one if not provided"
+    )
+    topic_id: Optional[str] = Field(
+        None,
+        description="Selected advising topic: 'general' (General Advising) or 'course' (Courses & Planning)"
     )
 
     class Config:
@@ -116,7 +79,7 @@ class ChatResponse(BaseModel):
     )
     response_source: str = Field(
         default="llm",
-        description="Source of response: 'llm', 'rule_based', or 'hybrid'"
+        description="Source of response: 'llm' or 'agentic_rag'"
     )
 
     class Config:
@@ -124,13 +87,12 @@ class ChatResponse(BaseModel):
             "example": {
                 "response": "Based on your transcript and GPA, I recommend taking...",
                 "intent": {
-                    "intent": "course_selection",
+                    "intent": "personal transcript query - asking about their own academic info",
                     "confidence": 0.92,
-                    "secondary_intents": [],
+                    "is_academic": True,
                     "requires_transcript": True,
-                    "rule_applicable": True,
-                    "suggested_response_type": "hybrid"
+                    "reasoning": "User is asking about their own data from uploaded transcript"
                 },
-                "response_source": "hybrid"
+                "response_source": "agentic_rag"
             }
         }

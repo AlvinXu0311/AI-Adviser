@@ -10,9 +10,17 @@ from .api.status import router as status_router
 from dotenv import load_dotenv
 import os
 import logging
+import langchain
 
-# Configure logging
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+# Enable LangChain debug mode for troubleshooting (can be disabled with env var)
+langchain.debug = os.getenv("LANGCHAIN_DEBUG", "false").lower() == "true"
+
+# Configure logging - default to INFO for production, DEBUG via env var
+log_level = os.getenv("LOG_LEVEL", "INFO")
+logging.basicConfig(
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Startup diagnostics: log which Python executable is running and whether redis is importable
@@ -36,21 +44,36 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS for Vite dev server (5173/5174) and legacy Angular fallback
-default_frontend_origins = "http://localhost:5173,http://localhost:5174,http://localhost:4200"
+# Configure CORS - allow all origins for tunnel deployment
+# For production, set FRONTEND_URL environment variable
+default_frontend_origins = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:4200"
 allowed_origins = [
     origin.strip()
     for origin in os.getenv("FRONTEND_URL", default_frontend_origins).split(",")
     if origin.strip()
 ]
-logger.info(f"Allowed CORS origins: {allowed_origins}")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,  # Angular frontend URL (configurable via env)
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# Check if running with tunnel (CORS needs to allow the dynamic tunnel URLs)
+allow_all_origins = os.getenv("ALLOW_ALL_ORIGINS", "false").lower() == "true"
+
+if allow_all_origins:
+    logger.info("CORS: Allowing all origins (tunnel mode)")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,  # Cannot use credentials with wildcard origin
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    logger.info(f"Allowed CORS origins: {allowed_origins}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Configure LLM provider
 llm_provider = os.getenv("LLM_PROVIDER", "google").lower()

@@ -1,81 +1,78 @@
 #!/bin/bash
 
-# Stop script for WPI Business School Chatbot
-# Stops both frontend and backend services
+# =============================================================================
+# WPI Chatbot - Stop All Services
+# Stops: backend, frontend, cloudflared tunnels, and frees all ports
+# =============================================================================
 
-echo "================================"
-echo "WPI Chatbot - Stop Services"
-echo "================================"
-echo ""
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-PIDFILE=".chatbot_pids"
+echo "================================"
+echo "WPI Chatbot - Stop All Services"
+echo "================================"
+echo ""
 
-# Check if PID file exists
-if [ ! -f "$PIDFILE" ]; then
-    echo -e "${YELLOW}No process ID file found${NC}"
-    echo "Attempting to kill processes on ports 5173/5174 and 8000..."
+# =============================================================================
+# Kill by process name
+# =============================================================================
+echo "Stopping processes..."
 
-    # Try to kill processes on specific ports
-    if command -v lsof &> /dev/null; then
-        # Kill processes on Vite dev server ports (5173, 5174 fallback)
-        for PORT in 5173 5174; do
-            FRONTEND_PID=$(lsof -ti :$PORT)
-            if [ ! -z "$FRONTEND_PID" ]; then
-                kill -9 $FRONTEND_PID 2>/dev/null
-                echo -e "${GREEN}Stopped Frontend (port $PORT, PID: $FRONTEND_PID)${NC}"
-            fi
-        done
+pkill -9 -f "uvicorn" 2>/dev/null && echo -e "  ${GREEN}✓ Stopped: uvicorn${NC}" || echo -e "  ${YELLOW}- uvicorn not running${NC}"
+pkill -9 -f "vite" 2>/dev/null && echo -e "  ${GREEN}✓ Stopped: vite${NC}" || echo -e "  ${YELLOW}- vite not running${NC}"
+pkill -9 -f "node.*frontend" 2>/dev/null
+pkill -9 -f "cloudflared" 2>/dev/null && echo -e "  ${GREEN}✓ Stopped: cloudflared${NC}" || echo -e "  ${YELLOW}- cloudflared not running${NC}"
 
-        # Kill process on port 8000 (Backend)
-        BACKEND_PID=$(lsof -ti :8000)
-        if [ ! -z "$BACKEND_PID" ]; then
-            kill -9 $BACKEND_PID 2>/dev/null
-            echo -e "${GREEN}Stopped Backend (PID: $BACKEND_PID)${NC}"
-        fi
-    else
-        echo -e "${YELLOW}lsof not found, trying alternative method...${NC}"
-        # For Windows or systems without lsof
-        if command -v netstat &> /dev/null; then
-            echo "Found processes, attempting to kill..."
-            # Try pkill if available
-            if command -v pkill &> /dev/null; then
-                pkill -f "vite" 2>/dev/null
-                pkill -f "uvicorn" 2>/dev/null
-                echo -e "${GREEN}Killed processes${NC}"
-            fi
-        fi
+# =============================================================================
+# Kill by port (all possible ports)
+# =============================================================================
+echo ""
+echo "Freeing ports..."
+
+PORTS_TO_CHECK="3000 5173 5174 8000 4040"
+for PORT in $PORTS_TO_CHECK; do
+    PID=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$PID" ]; then
+        kill -9 $PID 2>/dev/null
+        echo -e "  ${GREEN}✓ Freed port $PORT (PID: $PID)${NC}"
     fi
+done
+
+# =============================================================================
+# Clean up files
+# =============================================================================
+rm -f "$PROJECT_DIR/.chatbot_pids" "$PROJECT_DIR/.tunnel_pids" 2>/dev/null
+
+# Wait for cleanup
+sleep 1
+
+# =============================================================================
+# Verify all ports are free
+# =============================================================================
+echo ""
+echo "Verifying ports..."
+ALL_FREE=true
+
+for PORT in 3000 5173 8000; do
+    if lsof -i :$PORT > /dev/null 2>&1; then
+        echo -e "  ${RED}✗ Port $PORT: still in use${NC}"
+        ALL_FREE=false
+    else
+        echo -e "  ${GREEN}✓ Port $PORT: free${NC}"
+    fi
+done
+
+echo ""
+echo "================================"
+if [ "$ALL_FREE" = true ]; then
+    echo -e "${GREEN}All Services Stopped${NC}"
 else
-    echo "Stopping processes from $PIDFILE..."
-
-    # Read PIDs from file
-    while IFS= read -r PID; do
-        if [ ! -z "$PID" ]; then
-            if ps -p $PID > /dev/null 2>&1; then
-                kill -9 $PID 2>/dev/null
-                echo -e "${GREEN}Stopped process (PID: $PID)${NC}"
-            else
-                echo -e "${YELLOW}Process $PID not found${NC}"
-            fi
-        fi
-    done < "$PIDFILE"
-
-    # Remove PID file
-    rm -f "$PIDFILE"
-    echo "Process ID file removed"
+    echo -e "${YELLOW}Some ports still in use - try running again${NC}"
 fi
-
-echo ""
 echo "================================"
-echo -e "${GREEN}Services Stopped${NC}"
-echo "================================"
-echo ""
-echo "Port 5173 (Frontend):  Available"
-echo "Port 8000 (Backend):   Available"
 echo ""

@@ -1,133 +1,136 @@
+#!/bin/bash
 
-# --- Start script (simplified) ---
-echo "Starting Backend (FastAPI on port 8000)..."
+# =============================================================================
+# WPI Business School Chatbot - Local Development (Foreground)
+# =============================================================================
 
-# Resolve repo root
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
 
-# Paths
-BACKEND_DIR="$REPO_ROOT/backend"
-FRONTEND_DIR="$REPO_ROOT/frontend"
-BACKEND_VENV="$BACKEND_DIR/venv"
-PIDFILE="$REPO_ROOT/.chatbot_pids"
+# Color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-if [ ! -d "$BACKEND_DIR" ]; then
-    echo -e "${RED}✗ Could not find backend directory at $BACKEND_DIR${NC}"
-    exit 1
-fi
+echo "================================"
+echo "WPI Chatbot - Local Development"
+echo "================================"
+echo ""
 
-# Create PID file tracking
-rm -f "$PIDFILE"
+# Cleanup on exit
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}[Stopping all services...]${NC}"
+    pkill -9 -f "uvicorn" 2>/dev/null
+    pkill -9 -f "vite" 2>/dev/null
+    pkill -9 -f "node.*frontend" 2>/dev/null
+    for PORT in $BACKEND_PORT $FRONTEND_PORT 5173 5174; do
+        kill -9 $(lsof -ti :$PORT) 2>/dev/null
+    done
+    echo -e "${GREEN}Done.${NC}"
+    exit 0
+}
+trap cleanup INT TERM
 
-# Create backend venv if missing (do NOT create symlinks)
-if [ ! -d "$BACKEND_VENV" ] || [ ! -f "$BACKEND_VENV/bin/activate" ]; then
-    echo "backend venv not found. Creating $BACKEND_VENV..."
-    if ! python3 -m venv "$BACKEND_VENV"; then
-        echo -e "${RED}✗ Failed to create backend venv at $BACKEND_VENV${NC}"
-        echo "  Make sure python3-venv is installed: sudo apt install python3-venv"
+# =============================================================================
+# Step 1: Clean up existing processes
+# =============================================================================
+echo "[Step 1/4] Cleaning up..."
+pkill -9 -f "uvicorn" 2>/dev/null || true
+pkill -9 -f "vite" 2>/dev/null || true
+pkill -9 -f "node.*frontend" 2>/dev/null || true
+
+for PORT in $BACKEND_PORT $FRONTEND_PORT 5173 5174; do
+    PID=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$PID" ]; then
+        kill -9 $PID 2>/dev/null
+        echo "  Freed port $PORT"
+    fi
+done
+sleep 1
+echo -e "  ${GREEN}Done${NC}"
+
+# =============================================================================
+# Step 2: Check prerequisites
+# =============================================================================
+echo ""
+echo "[Step 2/4] Checking prerequisites..."
+
+# Check Redis
+if ! redis-cli ping > /dev/null 2>&1; then
+    echo -e "  ${YELLOW}Redis not running, starting...${NC}"
+    sudo systemctl start redis-server 2>/dev/null || sudo service redis-server start 2>/dev/null
+    sleep 1
+    if ! redis-cli ping > /dev/null 2>&1; then
+        echo -e "  ${RED}✗ Failed to start Redis${NC}"
+        echo "  Please install/start Redis: sudo apt install redis-server && sudo systemctl start redis-server"
         exit 1
     fi
-    echo "Created backend venv at $BACKEND_VENV"
+fi
+echo -e "  ${GREEN}✓ Redis running${NC}"
+
+BACKEND_VENV="$PROJECT_DIR/backend/venv"
+if [ ! -d "$BACKEND_VENV" ]; then
+    echo "  Creating Python venv..."
+    python3 -m venv "$BACKEND_VENV"
 fi
 
-# Install backend requirements (non-blocking failures are warned)
 if ! "$BACKEND_VENV/bin/python" -m pip show fastapi > /dev/null 2>&1; then
-    echo "Installing backend dependencies into $BACKEND_VENV from backend/requirements.txt..."
-    "$BACKEND_VENV/bin/pip" install --upgrade pip setuptools wheel || true
-    REQ_FILE="$BACKEND_DIR/requirements.txt"
-    if [ ! -f "$REQ_FILE" ]; then
-        REQ_FILE="$REPO_ROOT/requirements.txt"
-    fi
-    if ! "$BACKEND_VENV/bin/pip" install -r "$REQ_FILE"; then
-        echo -e "${YELLOW}⚠ Warning: Some backend dependencies failed to install into $BACKEND_VENV${NC}"
-        echo "  You can try: source $BACKEND_VENV/bin/activate && pip install -r $REQ_FILE"
-    fi
+    echo "  Installing backend dependencies..."
+    "$BACKEND_VENV/bin/pip" install -q -r "$PROJECT_DIR/backend/requirements.txt"
 fi
 
-# Activate backend venv
-# shellcheck disable=SC1090
-source "$BACKEND_VENV/bin/activate"
+# Ensure frontend has local backend URL
+echo "VITE_BACKEND_URL=http://localhost:$BACKEND_PORT" > "$PROJECT_DIR/frontend/.env"
 
-echo -e "${GREEN}Prerequisites check passed${NC}"
+echo -e "  ${GREEN}Prerequisites OK${NC}"
+
+# =============================================================================
+# Step 3: Start Backend (background)
+# =============================================================================
 echo ""
-
-# Start Backend
-echo "Starting Backend (FastAPI on port 8000)..."
-cd "$BACKEND_DIR" || exit 1
-
-"$BACKEND_VENV/bin/python" -m uvicorn app.main:app --reload --port 8000 > "$REPO_ROOT/backend.log" 2>&1 &
+echo "[Step 3/4] Starting Backend (port $BACKEND_PORT)..."
+cd "$PROJECT_DIR/backend"
+source venv/bin/activate
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT > "$PROJECT_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 
-# Give it a moment to start and check if it's still running
-sleep 1
+sleep 2
 if ! kill -0 $BACKEND_PID 2>/dev/null; then
-    echo -e "${RED}✗ Backend failed to start${NC}"
-    echo "  Check backend.log for details:"
-    cat "$REPO_ROOT/backend.log"
+    echo -e "  ${RED}Backend failed to start${NC}"
+    cat "$PROJECT_DIR/backend.log"
     exit 1
 fi
+echo -e "  ${GREEN}Backend started (PID: $BACKEND_PID)${NC}"
 
-echo $BACKEND_PID >> "$PIDFILE"
-echo -e "${GREEN}Backend started (PID: $BACKEND_PID)${NC}"
-
-cd "$REPO_ROOT" || exit 1
-
-# Start Frontend
+# =============================================================================
+# Step 4: Start Frontend (foreground)
+# =============================================================================
 echo ""
-echo "Starting Frontend (React/Vite on port 5173)..."
-cd frontend
+echo "[Step 4/4] Starting Frontend (port $FRONTEND_PORT)..."
+cd "$PROJECT_DIR/frontend"
 
-# Check if dependencies are installed
 if [ ! -d "node_modules" ]; then
-    echo "Installing frontend dependencies..."
+    echo "  Installing frontend dependencies..."
     npm install
 fi
 
-# Start frontend in background (Vite dev server)
-npm run dev -- --host 0.0.0.0 --port 5173 > "../frontend.log" 2>&1 &
-FRONTEND_PID=$!
-
-# Give it a moment to start (frontend takes longer to compile)
-sleep 3
-if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-    echo -e "${RED}✗ Frontend failed to start${NC}"
-    echo "  Check frontend.log for details:"
-    tail -20 ../frontend.log
-    exit 1
-fi
-
-echo $FRONTEND_PID >> "../$PIDFILE"
-echo -e "${GREEN}✓ Frontend started (PID: $FRONTEND_PID)${NC}"
-
-cd ..
-
 echo ""
 echo "================================"
-echo -e "${GREEN}Services Started Successfully${NC}"
+echo -e "${GREEN}Services Starting...${NC}"
 echo "================================"
 echo ""
 echo "Access Points:"
-echo "  Frontend:  http://localhost:5173"
-echo "  Backend:   http://localhost:8000"
-echo "  API Docs:  http://localhost:8000/docs"
-echo "  Health:    http://localhost:8000/api/health"
+echo "  Frontend:  http://localhost:$FRONTEND_PORT"
+echo "  Backend:   http://localhost:$BACKEND_PORT"
+echo "  API Docs:  http://localhost:$BACKEND_PORT/docs"
 echo ""
-echo "LangChain Agentic RAG:"
-echo "  Adviser Agent:       Autonomous reasoning with ReAct pattern"
-echo "  Hybrid RAG:          BM25 + Semantic search with ensemble"
-echo "  Tools:               RAG Search, Student Context, Complexity Analysis"
-echo "  Vector Database:     Chroma (for embeddings)"
+echo "Press Ctrl+C to stop all services"
 echo ""
-echo "Logs:"
-echo "  Backend log:   tail -f backend.log"
-echo "  Frontend log:  tail -f frontend.log"
-echo ""
-echo "To stop services:"
-echo "  Press Ctrl+C (stops both)"
-echo "  Or run: ./stop.sh"
-echo ""
-echo "Backend is ready! Check logs above for any errors."
+echo "================================"
 echo ""
 
-# Keep script running and show logs
-tail -f backend.log frontend.log
+# Run frontend in foreground (blocking)
+npm run dev -- --host 0.0.0.0

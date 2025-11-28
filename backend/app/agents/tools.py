@@ -9,45 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Tool 1: RAG Retrieval for program information
-def rag_retrieval_tool(query: str) -> str:
-    """
-    Search WPI Business School program knowledge base for:
-    - Program overviews (MSIT, MSBA, MSM)
-    - Core course requirements
-    - Elective and specialization options
-    - Program prerequisites and enrollment criteria
-    - Course descriptions and learning outcomes
-
-    Use this tool for ANY question about programs, courses, requirements, or specializations.
-    Returns structured program information from the knowledge base.
-    """
-    try:
-        from ..services.rag_service import get_rag_service
-
-        logger.info(f"RAG tool invoked: {query[:50]}...")
-
-        rag_service = get_rag_service()
-        context = rag_service.get_context_for_query(
-            query,
-            program_id="msit",
-            top_k=8,
-            use_bm25=True
-        )
-
-        if context:
-            logger.info(f"RAG retrieved {len(context)} chars of context")
-            return f"Program Information Found:\n{context}"
-        else:
-            logger.warning("RAG returned no context")
-            return "No relevant program information found in knowledge base."
-
-    except Exception as e:
-        logger.error(f"Error in RAG retrieval tool: {str(e)}")
-        return f"Error retrieving information: {str(e)}"
-
-
-# Tool 2: Student context lookup
+# Tool 1: Student context lookup
 def context_lookup_tool(info_type: str = "all") -> str:
     """
     Retrieve cached student transcript information for personalized advising.
@@ -59,7 +21,7 @@ def context_lookup_tool(info_type: str = "all") -> str:
     - Program and enrollment information
     - Academic standing or recommendations
 
-    Options: 'gpa', 'courses', 'program', 'progress', or 'all' for complete info.
+    Options: 'gpa', 'courses', 'grades', 'program', 'progress', or 'all' for complete info.
     Returns: Empty if no transcript uploaded. Otherwise returns student academic data.
     """
     try:
@@ -82,11 +44,21 @@ def context_lookup_tool(info_type: str = "all") -> str:
             if student_context.program_info:
                 result.append(f"Program: {student_context.program_info.program_name}")
 
-        if info_type in ["all", "courses"]:
+        if info_type in ["all", "courses", "grades"]:
             if student_context.completed_courses:
-                result.append(f"Completed Courses: {len(student_context.completed_courses)}")
+                # Build detailed course list with grades
+                course_details = []
+                for course in student_context.completed_courses:
+                    grade_str = f", Grade: {course.grade}" if course.grade else ""
+                    course_details.append(f"{course.course_code} - {course.course_name} ({course.credits} cr{grade_str})")
+                completed_list = "\n  - ".join(course_details)
+                result.append(f"Completed Courses ({len(student_context.completed_courses)}):\n  - {completed_list}")
             if student_context.current_courses:
-                result.append(f"Current Courses: {len(student_context.current_courses)}")
+                current_details = []
+                for course in student_context.current_courses:
+                    current_details.append(f"{course.course_code} - {course.course_name} ({course.credits} cr)")
+                current_list = "\n  - ".join(current_details)
+                result.append(f"Current Courses ({len(student_context.current_courses)}):\n  - {current_list}")
 
         if info_type in ["all", "progress"]:
             progress = context_manager.get_academic_progress()
@@ -101,7 +73,7 @@ def context_lookup_tool(info_type: str = "all") -> str:
         return f"Error retrieving context: {str(e)}"
 
 
-# Tool 3: Query complexity assessment
+# Tool 2: Query complexity assessment
 def complexity_assessment_tool(query: str) -> str:
     """
     Assess query complexity to determine optimal reasoning approach:
@@ -168,13 +140,65 @@ def _assess_complexity(query: str) -> str:
     return "medium" if len(query.split()) > 15 else "simple"
 
 
-# Initialize tools with proper formatting
-RAG_RETRIEVAL_TOOL = Tool(
-    name="rag_search",
-    func=rag_retrieval_tool,
-    description="Search program information from knowledge base. Use for course requirements, specializations, program structure, etc."
-)
+def business_school_db_tool(query: str) -> str:
+    """Query the authoritative Business School SQLite database for program data."""
+    try:
+        from ..services.program_db_service import get_program_db_service
 
+        logger.info("Business School DB tool invoked")
+        service = get_program_db_service()
+        return service.summarize_programs(query)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Error in Business School DB tool: %s", exc)
+        return f"Database lookup failed: {exc}"
+
+
+def semantic_search_tool(query: str) -> str:
+    """
+    Semantic search across all academic entities using Google Embeddings + ChromaDB.
+    
+    Searches:
+    - Courses: by topic, description, instructor name
+    - Programs: by name, description, requirements  
+    - Specialties: by focus area, description
+    
+    Uses hybrid approach: vector similarity + keyword matching for best results.
+    Returns detailed info including instructors, credits, descriptions.
+    """
+    try:
+        from ..services.vector_search_service import get_vector_search_service
+        
+        logger.info(f"Semantic search tool invoked for: {query}")
+        service = get_vector_search_service()
+        return service.search(query, top_k=5)
+    except Exception as exc:
+        logger.error("Error in semantic search tool: %s", exc)
+        return f"Semantic search failed: {exc}"
+
+
+def course_search_tool(query: str) -> str:
+    """
+    Search specifically for courses using semantic + keyword matching.
+    
+    Best for finding:
+    - Courses by topic (e.g., 'data mining', 'machine learning')
+    - Instructor information (e.g., 'Who teaches marketing?')
+    - Course details by code (e.g., 'MIS 500')
+    
+    Returns: course code, title, credits, instructors, description.
+    """
+    try:
+        from ..services.vector_search_service import get_vector_search_service, EntityType
+        
+        logger.info(f"Course search tool invoked for: {query}")
+        service = get_vector_search_service()
+        return service.search(query, entity_type=EntityType.COURSE, top_k=5)
+    except Exception as exc:
+        logger.error("Error in course search tool: %s", exc)
+        return f"Course search failed: {exc}"
+
+
+# Initialize tools with proper formatting
 CONTEXT_LOOKUP_TOOL = Tool(
     name="student_context",
     func=context_lookup_tool,
@@ -187,11 +211,45 @@ COMPLEXITY_ASSESSMENT_TOOL = Tool(
     description="Assess query complexity to determine reasoning approach needed."
 )
 
+BUSINESS_SCHOOL_DB_TOOL = Tool(
+    name="business_school_database",
+    func=business_school_db_tool,
+    description=(
+        "Look up official Business School program structure from SQLite database. "
+        "Best for: listing all programs, specialties, degree requirements. "
+        "Input: program code (e.g., 'MSIT', 'MSBA') or 'all' for overview."
+    )
+)
+
+SEMANTIC_SEARCH_TOOL = Tool(
+    name="semantic_search",
+    func=semantic_search_tool,
+    description=(
+        "Semantic search across courses, programs, and specialties using AI embeddings. "
+        "Best for: finding info by topic/concept when you don't know exact names. "
+        "Input: natural language query (e.g., 'machine learning courses', 'data analytics program'). "
+        "Returns: matched courses, programs, specialties with details."
+    )
+)
+
+COURSE_SEARCH_TOOL = Tool(
+    name="course_search",
+    func=course_search_tool,
+    description=(
+        "Search for courses using semantic + keyword matching. "
+        "Best for: finding courses by topic, getting instructor info. "
+        "Input: topic (e.g., 'data mining'), code (e.g., 'MIS 500'), or instructor query. "
+        "Returns: course code, title, credits, instructors, description."
+    )
+)
+
 
 def get_all_tools() -> List[Tool]:
     """Get all available tools for the agent"""
     return [
-        RAG_RETRIEVAL_TOOL,
         CONTEXT_LOOKUP_TOOL,
-        COMPLEXITY_ASSESSMENT_TOOL
+        COMPLEXITY_ASSESSMENT_TOOL,
+        BUSINESS_SCHOOL_DB_TOOL,
+        SEMANTIC_SEARCH_TOOL,
+        COURSE_SEARCH_TOOL,
     ]

@@ -2,6 +2,7 @@ type ChatRequest = {
   message: string;
   transcript_context?: any;
   session_id?: string;
+  topic_id?: string;  // Selected advising topic: 'general' or 'course'
 };
 
 const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
@@ -16,7 +17,6 @@ export async function streamChat(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
-    credentials: 'include',
   });
 
   if (!res.ok || !res.body) {
@@ -93,7 +93,6 @@ export async function extractTranscript(file: File) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pdf_base64: b64 }),
-    credentials: 'include',
   });
 
   if (!res.ok) {

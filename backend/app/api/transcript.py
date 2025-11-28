@@ -8,6 +8,7 @@ from ..schemas.transcript import (
     ExtractedTranscriptData,
 )
 from ..services.pdf_extraction_service import PDFExtractionService
+from ..services.context_manager import get_context_manager
 from ..utils.error_handler import handle_pdf_extraction_error
 
 router = APIRouter()
@@ -29,6 +30,7 @@ def get_pdf_service():
 async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTranscriptResponse:
     """
     Extract and parse transcript data from a base64 encoded PDF.
+    Also stores the extracted data in context_manager for subsequent chat requests.
 
     Args:
         request: ExtractTranscriptRequest containing base64 PDF
@@ -45,6 +47,10 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
         transcript_data: ExtractedTranscriptData = await get_pdf_service().process_pdf(
             request.pdf_base64
         )
+
+        # Store in context manager for subsequent chat requests
+        context_manager = get_context_manager()
+        context_manager.set_student_context(transcript_data)
 
         return ExtractTranscriptResponse(
             success=True,

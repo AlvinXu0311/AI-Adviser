@@ -363,13 +363,15 @@ Here is the COMPLETE raw transcript text to analyze:
                 transcript_data.completed_courses = []
                 for course_data in formatted_data["completed_courses"]:
                     if course_data.get("course_code") and course_data.get("course_name"):
+                        grade = course_data.get("grade")
                         course = CourseInfo(
                             course_code=course_data["course_code"],
                             course_name=course_data["course_name"],
                             credits=float(course_data.get("credits", 0)),
-                            grade=course_data.get("grade")
+                            grade=grade
                         )
                         transcript_data.completed_courses.append(course)
+                        print(f"   [COURSE] {course.course_code}: {course.course_name} | Credits: {course.credits} | Grade: {grade or 'NOT FOUND'}")
 
             # Parse current courses
             if formatted_data.get("current_courses"):
@@ -382,6 +384,7 @@ Here is the COMPLETE raw transcript text to analyze:
                             credits=float(course_data.get("credits", 0))
                         )
                         transcript_data.current_courses.append(course)
+                        print(f"   [CURRENT] {course.course_code}: {course.course_name} | Credits: {course.credits}")
 
             print("[INFO] [LLM Formatting] Successfully formatted transcript data with LLM")
             return transcript_data

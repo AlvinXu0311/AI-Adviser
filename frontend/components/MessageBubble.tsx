@@ -22,21 +22,21 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
       <div className={`flex max-w-[90%] md:max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'} items-start gap-3`}>
         
         {/* Avatar */}
-        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm mt-1 ${
+        <div className={`flex-shrink-0 w-14 h-14 rounded-full flex items-center justify-center shadow-sm mt-1 ${
           isUser ? 'bg-gray-200' : 'bg-wpi-red'
         }`}>
-          {isUser ? <User size={16} className="text-gray-600" /> : <Bot size={16} className="text-white" />}
+          {isUser ? <User size={28} className="text-gray-600" /> : <Bot size={28} className="text-white" />}
         </div>
 
         {/* Bubble Content */}
-        <div className="flex flex-col space-y-1">
+        <div className="flex flex-col space-y-2">
           {/* Sender Name */}
-          <span className={`text-[10px] font-semibold text-gray-400 ${isUser ? 'text-right' : 'text-left'} px-1`}>
+          <span className={`text-base font-semibold text-gray-500 ${isUser ? 'text-right' : 'text-left'} px-1`}>
             {isUser ? 'You' : 'Digital Adviser'}
           </span>
 
           <div className={`
-            relative p-4 rounded-2xl shadow-sm text-sm leading-relaxed
+            relative p-6 rounded-2xl shadow-sm text-xl leading-relaxed
             ${isUser 
               ? 'bg-wpi-red text-white rounded-tr-none' 
               : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
@@ -60,15 +60,15 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
 
              {/* Thought Steps (Agentic View) - Only for Assistant */}
              {!isUser && message.thoughtSteps && message.thoughtSteps.length > 0 && (
-               <div className="mt-3 pt-3 border-t border-gray-100">
-                  <p className="text-[10px] text-gray-400 font-semibold mb-1 uppercase tracking-wider flex items-center">
-                    <CheckCircle2 size={10} className="mr-1 text-green-500" /> 
+               <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-sm text-gray-400 font-semibold mb-2 uppercase tracking-wider flex items-center">
+                    <CheckCircle2 size={16} className="mr-2 text-green-500" /> 
                     Agent Process
                   </p>
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {message.thoughtSteps.map((step, idx) => (
-                      <div key={idx} className="flex items-center text-[10px] text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">
-                        <ArrowRight size={8} className="mr-2 text-gray-300" />
+                      <div key={idx} className="flex items-center text-sm text-gray-500 font-mono bg-gray-50 px-3 py-2 rounded">
+                        <ArrowRight size={14} className="mr-2 text-gray-300" />
                         {step}
                       </div>
                     ))}
@@ -83,21 +83,21 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
-              className="flex flex-wrap gap-2 ml-1 mt-1"
+              className="flex flex-wrap gap-3 ml-1 mt-2"
             >
               {message.citations.map((cit) => (
                 <button 
                   key={cit.id}
-                  className="flex items-center space-x-1 bg-white border border-gray-200 hover:border-wpi-red hover:shadow-md transition-all text-[10px] text-gray-600 px-2 py-1 rounded-md"
+                  className="flex items-center space-x-2 bg-white border border-gray-200 hover:border-wpi-red hover:shadow-md transition-all text-base text-gray-600 px-4 py-2 rounded-lg"
                 >
-                  <Book size={10} className="text-wpi-red" />
-                  <span className="font-medium truncate max-w-[150px]">{cit.source}</span>
+                  <Book size={18} className="text-wpi-red" />
+                  <span className="font-medium truncate max-w-[200px]">{cit.source}</span>
                 </button>
               ))}
             </motion.div>
           )}
           
-          <span className={`text-[10px] text-gray-300 ${isUser ? 'text-right' : 'text-left'} px-1`}>
+          <span className={`text-sm text-gray-400 ${isUser ? 'text-right' : 'text-left'} px-1`}>
              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>

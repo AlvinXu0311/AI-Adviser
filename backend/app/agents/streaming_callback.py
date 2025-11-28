@@ -56,10 +56,16 @@ class StreamingCallbackHandler(AsyncCallbackHandler):
     ) -> None:
         """Run when tool starts."""
         tool_name = serialized.get("name", "Unknown Tool")
+        # Filter out internal error recovery tools
+        if tool_name == "_Exception":
+            return  # Don't show internal parsing error recovery to user
         await self.queue.put(json.dumps({"type": "tool_start", "tool_name": tool_name, "input": input_str}))
 
     async def on_tool_end(self, output: str, **kwargs: Any) -> None:
         """Run when tool ends."""
+        # Filter out internal parsing error messages
+        if "Invalid Format" in output or "Missing 'Action:'" in output:
+            return  # Don't show internal format errors to user
         await self.queue.put(json.dumps({"type": "tool_end", "output": output}))
 
     async def on_tool_error(

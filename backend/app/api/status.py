@@ -6,7 +6,8 @@ from typing import Dict
 
 from fastapi import APIRouter
 
-from ..services.rag_service import get_rag_service
+# DEPRECATED: RAG service no longer used - Database-First architecture
+# from ..services.rag_service import get_rag_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -27,26 +28,27 @@ def _status_payload(
     }
 
 
-def _check_vector_db() -> Dict[str, str]:
-    """Verify the in-memory RAG index is ready."""
-    try:
-        rag_service = get_rag_service()
-        documents = getattr(rag_service, "documents", []) or []
-        bm25_ready = getattr(rag_service, "bm25", None) is not None
-
-        if documents and bm25_ready:
-            return _status_payload(
-                "vector_db",
-                "Vector DB",
-                "online",
-                f"Indexed documents: {len(documents)}"
-            )
-
-        reason = "BM25 index unavailable" if not bm25_ready else "No documents loaded"
-        return _status_payload("vector_db", "Vector DB", "offline", reason)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Vector DB status check failed")
-        return _status_payload("vector_db", "Vector DB", "offline", str(exc))
+# DEPRECATED: Vector DB check no longer needed - Database-First architecture
+# def _check_vector_db() -> Dict[str, str]:
+#     """Verify the in-memory RAG index is ready."""
+#     try:
+#         rag_service = get_rag_service()
+#         documents = getattr(rag_service, "documents", []) or []
+#         bm25_ready = getattr(rag_service, "bm25", None) is not None
+#
+#         if documents and bm25_ready:
+#             return _status_payload(
+#                 "vector_db",
+#                 "Vector DB",
+#                 "online",
+#                 f"Indexed documents: {len(documents)}"
+#             )
+#
+#         reason = "BM25 index unavailable" if not bm25_ready else "No documents loaded"
+#         return _status_payload("vector_db", "Vector DB", "offline", reason)
+#     except Exception as exc:  # pragma: no cover - defensive logging
+#         logger.exception("Vector DB status check failed")
+#         return _status_payload("vector_db", "Vector DB", "offline", str(exc))
 
 
 def _check_gemini() -> Dict[str, str]:
@@ -121,8 +123,9 @@ def _check_streaming() -> Dict[str, str]:
 @router.get("/status")
 async def get_system_status():
     """Return health for the core subsystems used by the adviser."""
+    # Database-First architecture - Vector DB check no longer needed
     components = [
-        _check_vector_db(),
+        # _check_vector_db(),  # DEPRECATED: RAG removed
         _check_gemini(),
         _check_streaming(),
     ]
