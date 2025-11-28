@@ -13,7 +13,6 @@ from ..schemas.transcript import (
     CourseInfo,
     ProgramInfo,
 )
-from .context_manager import get_context_manager
 
 
 class PDFExtractionService:
@@ -319,19 +318,58 @@ Here is the COMPLETE raw transcript text to analyze:
             if not response.text:
                 raise ValueError("LLM returned empty response")
 
-            # Parse LLM response as JSON
+            # Parse LLM response as JSON with robust cleaning
             json_text = response.text.strip()
+            
             # Remove markdown code blocks if present
             if json_text.startswith("```"):
-                json_text = json_text.split("```")[1]
-                if json_text.startswith("json"):
-                    json_text = json_text[4:]
-                json_text = json_text.strip()
+                # Handle ```json or just ```
+                lines = json_text.split("\n")
+                # Remove first line (```json or ```)
+                lines = lines[1:]
+                # Remove last line if it's just ```
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                json_text = "\n".join(lines).strip()
+            
+            # Additional cleanup for common LLM issues
+            # Remove trailing commas before } or ]
+            json_text = re.sub(r',(\s*[}\]])', r'\1', json_text)
+            # Remove any non-JSON text before the first {
+            first_brace = json_text.find('{')
+            if first_brace > 0:
+                json_text = json_text[first_brace:]
+            # Remove any non-JSON text after the last }
+            last_brace = json_text.rfind('}')
+            if last_brace > 0 and last_brace < len(json_text) - 1:
+                json_text = json_text[:last_brace + 1]
 
-            print(f"[INFO] [LLM Formatting] Parsing LLM response...{json_text}")
-            print(f"   Response length: len{json_text} characters")
+            print(f"[INFO] [LLM Formatting] Parsing LLM response...")
+            print(f"   Response length: {len(json_text)} characters")
 
-            formatted_data = json.loads(json_text)
+            try:
+                formatted_data = json.loads(json_text)
+            except json.JSONDecodeError as e:
+                print(f"[WARN] [LLM Formatting] Initial JSON parse failed: {e}")
+                print(f"[WARN] [LLM Formatting] Attempting JSON repair...")
+                
+                # Try more aggressive cleanup
+                # Replace single quotes with double quotes
+                json_text_fixed = json_text.replace("'", '"')
+                # Remove control characters
+                json_text_fixed = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_text_fixed)
+                # Fix unquoted keys
+                json_text_fixed = re.sub(r'(\w+)(?=\s*:)', r'"\1"', json_text_fixed)
+                # Remove duplicate quotes
+                json_text_fixed = re.sub(r'""(\w+)""', r'"\1"', json_text_fixed)
+                
+                try:
+                    formatted_data = json.loads(json_text_fixed)
+                    print("[INFO] [LLM Formatting] JSON repair successful")
+                except json.JSONDecodeError as e2:
+                    print(f"[ERROR] [LLM Formatting] JSON repair failed: {e2}")
+                    print(f"[DEBUG] Problematic JSON:\n{json_text[:500]}...")
+                    raise ValueError(f"Invalid JSON response from LLM: {str(e)}")
 
             # Convert JSON to ExtractedTranscriptData object
             transcript_data = ExtractedTranscriptData(
@@ -432,10 +470,8 @@ Here is the COMPLETE raw transcript text to analyze:
             print("[PDF Processing] This will extract: student info, GPA, all courses, grades, credits")
             transcript_data = self.format_extracted_text_with_llm(extracted_text)
 
-            # Step 3: Store in shared context cache
-            print("\n [PDF Processing] STEP 3: Storing in shared context cache for chat service")
-            context_manager = get_context_manager()
-            context_manager.set_student_context(transcript_data)
+            # Note: Context storage is handled by the API layer (transcript.py) with session_id
+            # This service only extracts data, it doesn't manage session context
 
             # Summary
             print("\n" + "="*80)
@@ -448,7 +484,6 @@ Here is the COMPLETE raw transcript text to analyze:
             print(f"   [INFO] Completed Courses: {len(transcript_data.completed_courses) if transcript_data.completed_courses else 0}")
             print(f"   [INFO] Current Courses: {len(transcript_data.current_courses) if transcript_data.current_courses else 0}")
             print(f"   [INFO] Raw Text Length: {len(transcript_data.raw_text) if transcript_data.raw_text else 0} characters")
-            print("   [INFO] Context cached for chat service")
             print("="*80 + "\n")
 
             return transcript_data

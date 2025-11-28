@@ -142,6 +142,12 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 # Handle session ID and conversation memory
                 logger.debug("Generating session ID")
                 session_id = request.session_id or generate_session_id()
+                
+                # Set current session for tool access (contextvars)
+                from ..services.context_manager import set_current_session
+                set_current_session(session_id)
+                logger.debug(f"Set current session: {session_id[:8]}...")
+                
                 logger.debug("Getting conversation memory")
                 memory = get_conversation_memory()
                 logger.debug("Adding user message to memory")
@@ -153,14 +159,14 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 topic_id = request.topic_id  # 'general' or 'course'
                 logger.info(f"User selected topic: {topic_id or 'not specified'}")
 
-                # Get cached student context
+                # Get cached student context (session-based)
                 logger.debug("Getting context manager")
                 context_manager = get_context_manager()
-                logger.debug("Getting student context")
-                cached_context = context_manager.get_student_context()
+                logger.debug(f"Getting student context for session: {session_id}")
+                cached_context = context_manager.get_student_context(session_id)
 
                 student_context_to_use = None
-                if cached_context:
+                if cached_context and cached_context.has_transcript():
                     student_context_to_use = cached_context
                 elif request.transcript_context:
                     logger.debug("Building student context from transcript")

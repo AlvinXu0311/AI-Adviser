@@ -33,7 +33,7 @@ class AdviserAgent:
 
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-pro",
-            temperature=0.7,
+            temperature=0.3,  # Lower temperature for more consistent output format
             max_output_tokens=2048,
             google_api_key=api_key,
             streaming=True
@@ -139,23 +139,38 @@ You have access to the following tools:
 
 Tool names: {tool_names}
 
-IMPORTANT: You MUST strictly follow this format for EVERY response:
+================================================================================
+RESPONSE FORMAT (STRICTLY REQUIRED - NO EXCEPTIONS):
+================================================================================
 
-Question: the input question you must answer
-Thought: I need to [your reasoning here]
-Action: [one of: {tool_names}]
-Action Input: [input for the tool]
-Observation: [tool result - this will be provided]
-... (repeat Thought/Action/Action Input/Observation as needed)
-Thought: I now have the information needed to answer
-Final Answer: [your complete response to the user]
+You MUST respond in ONE of these two formats ONLY:
 
-NEVER skip the "Action:" line after a "Thought:" line unless you are giving the Final Answer.
+FORMAT A - When you need to use a tool:
+```
+Thought: [your reasoning about what tool to use and why]
+Action: [exactly one tool name from: {tool_names}]
+Action Input: [the input string for the tool]
+```
+
+FORMAT B - When you have the final answer (ONLY after getting tool results):
+```
+Thought: I now have the information needed to answer the question.
+Final Answer: [your complete, helpful response to the user]
+```
+
+RULES:
+1. NEVER output anything except these two formats
+2. NEVER skip Action/Action Input after a Thought (unless it's Final Answer)
+3. NEVER combine multiple actions in one response
+4. After each tool result (Observation), respond with another Thought
+5. Use Final Answer ONLY when you have enough information to answer completely
+
+================================================================================
 
 Begin!
 
 Question: {input}
-Thought: Let me help with this question
+Thought: Let me analyze this question and determine which tool to use.
 {agent_scratchpad}"""
 
         from langchain.prompts import PromptTemplate as LP
@@ -165,20 +180,40 @@ Thought: Let me help with this question
         )
 
         agent = create_react_agent(self.llm, self.tools, prompt)
+        
+        # Custom parsing error handler that helps LLM recover
+        def handle_parsing_error(error) -> str:
+            """Handle parsing errors gracefully and guide LLM to correct format."""
+            error_str = str(error)
+            if "Could not parse LLM output" in error_str:
+                # Extract the problematic output if available
+                return (
+                    "I notice you didn't follow the required format. "
+                    "Please respond with EXACTLY this format:\n\n"
+                    "Thought: [your reasoning about what to do next]\n"
+                    "Action: [tool name - one of: student_context, business_school_database, assess_complexity, semantic_search, course_search]\n"
+                    "Action Input: [the input for the tool]\n\n"
+                    "OR if you have enough information to answer:\n\n"
+                    "Thought: I now have the information needed to answer the question.\n"
+                    "Final Answer: [your complete response to the user]"
+                )
+            return f"An error occurred: {error_str}. Please try again with the correct format."
+        
         executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=False,  # Disabled verbose stdout callback to avoid callback errors
-            max_iterations=5,  # Reduced from 10 to prevent looping
+            max_iterations=10,  # Allow more iterations for complex queries like degree progress
             early_stopping_method="force",
-            handle_parsing_errors="Check your output format. You must follow this exact format:\nThought: [your reasoning]\nAction: [tool name]\nAction Input: [input]\n\nOR if you have the final answer:\nThought: [your reasoning]\nFinal Answer: [your response]"
+            handle_parsing_errors=handle_parsing_error,
+            return_intermediate_steps=True,  # Help debug issues
         )
         return executor
 
     async def answer_query(
         self,
         query: str,
-        context: Optional[Any] = None,  # Can be ExtractedTranscriptData or TranscriptContext
+        context: Optional[Any] = None,  # Can be ExtractedTranscriptData or TranscriptContext or StudentContext
         program_id: str = "msit",
         callbacks: Optional[List[AsyncCallbackHandler]] = None,
         session_id: Optional[str] = None,
@@ -190,9 +225,10 @@ Thought: Let me help with this question
 
         Args:
             query: Student's question
-            context: Optional transcript context (ExtractedTranscriptData from PDF or TranscriptContext from API)
+            context: Optional transcript context (StudentContext from session-based storage)
             program_id: Program identifier (msit, msba, msm)
             callbacks: Optional list of async callback handlers for streaming
+            session_id: Session ID for context isolation
 
         Returns:
             Dict with response, reasoning, and tools used
@@ -200,6 +236,7 @@ Thought: Let me help with this question
         try:
             logger.info(f"Processing query with adviser agent: {query[:50]}...")
             logger.info(f"Topic context: {topic_id or 'not specified'}")
+            logger.info(f"Session ID: {session_id[:8] if session_id else 'None'}...")
 
             # Note: No Layer 3 hardcoded validation here anymore
             # Intent classification with Redis memory context already handles query meaningfulness
@@ -257,32 +294,16 @@ Thought: Let me help with this question
             else:
                 query_with_context = query
 
-            # Store context for tool access
+            # Student context is already stored in context_manager by session_id from transcript upload
+            # The 'context' parameter here is the StudentContext object retrieved for this session
+            has_transcript = False
             if context:
-                context_manager = get_context_manager()
-                from ..schemas.transcript import ExtractedTranscriptData, ProgramInfo
-
-                # Check if we already have ExtractedTranscriptData (from PDF) or need to convert
-                if isinstance(context, ExtractedTranscriptData):
-                    # Already full transcript data from PDF - use it directly
-                    logger.info(f"Using full ExtractedTranscriptData for student: {context.student_name}")
-                    logger.info(f"  - Student ID: {context.student_id}")
-                    logger.info(f"  - GPA: {context.gpa}")
-                    logger.info(f"  - Completed courses: {len(context.completed_courses) if context.completed_courses else 0}")
-                    logger.info(f"  - Current courses: {len(context.current_courses) if context.current_courses else 0}")
-                    context_manager.set_student_context(context)
+                from ..services.context_manager import StudentContext
+                if isinstance(context, StudentContext) and context.has_transcript():
+                    has_transcript = True
+                    logger.info(f"Using StudentContext for session: student={context.student_name}, courses={len(context.courses)}")
                 else:
-                    # Convert TranscriptContext (from API) to ExtractedTranscriptData
-                    transcript_data = ExtractedTranscriptData(
-                        student_name=context.student_name,
-                        student_id=context.student_name or "N/A",  # Limited info from API
-                        gpa=context.gpa,
-                        program_info=ProgramInfo(program_name=context.program) if context.program else None,
-                        completed_courses=[],
-                        current_courses=[]
-                    )
-                    logger.info(f"Converted TranscriptContext for student: {context.student_name}")
-                    context_manager.set_student_context(transcript_data)
+                    logger.info("Context provided but not a valid StudentContext with transcript data")
             else:
                 logger.info("No transcript context provided - user must upload PDF for personalized info")
 
@@ -307,7 +328,7 @@ Thought: Let me help with this question
                 "reasoning": "Chat Agent used ReAct pattern with database-first tool use",
                 "tools_used": ["business_school_database", "student_context", "assess_complexity"],
                 "source": "database_first",
-                "has_transcript": context is not None
+                "has_transcript": has_transcript
             }
 
         except Exception as e:
@@ -337,8 +358,8 @@ Thought: Let me help with this question
         conversation_context: str = "",
         topic_guidance: str = ""
     ) -> str:
-        """Format the input for the agent, handling both TranscriptContext and ExtractedTranscriptData"""
-        from ..schemas.transcript import ExtractedTranscriptData
+        """Format the input for the agent, handling StudentContext from session-based storage"""
+        from ..services.context_manager import StudentContext
 
         input_text = ""
 
@@ -352,39 +373,20 @@ Thought: Let me help with this question
 
         input_text += f"Student Question: {query}\n"
 
-        if context:
+        if context and isinstance(context, StudentContext) and context.has_transcript():
             input_text += f"\nStudent Context:\n"
-
-            # Handle ExtractedTranscriptData (from PDF extraction)
-            if isinstance(context, ExtractedTranscriptData):
-                if context.student_name:
-                    input_text += f"- Name: {context.student_name}\n"
-                if context.student_id:
-                    input_text += f"- Student ID: {context.student_id}\n"
-                if context.gpa is not None:
-                    input_text += f"- GPA: {context.gpa}/4.0\n"
-                if context.program_info and context.program_info.program_name:
-                    input_text += f"- Program: {context.program_info.program_name}\n"
-
-                # Count completed and current courses
-                completed_count = len(context.completed_courses) if context.completed_courses else 0
-                current_count = len(context.current_courses) if context.current_courses else 0
-
-                if completed_count > 0:
-                    input_text += f"- Completed Courses: {completed_count}\n"
-                if current_count > 0:
-                    input_text += f"- Current Courses: {current_count}\n"
-
-            # Handle TranscriptContext (legacy format from API)
-            else:
-                if context.student_name:
-                    input_text += f"- Name: {context.student_name}\n"
-                if context.gpa is not None:
-                    input_text += f"- GPA: {context.gpa}/4.0\n"
-                if hasattr(context, 'program') and context.program:
-                    input_text += f"- Program: {context.program}\n"
-                if hasattr(context, 'course_count') and context.course_count is not None:
-                    input_text += f"- Courses Completed: {context.course_count}\n"
+            if context.student_name:
+                input_text += f"- Name: {context.student_name}\n"
+            if context.student_id:
+                input_text += f"- Student ID: {context.student_id}\n"
+            if context.gpa is not None:
+                input_text += f"- GPA: {context.gpa}/4.0\n"
+            if context.degree_program:
+                input_text += f"- Program: {context.degree_program}\n"
+            
+            # Count completed courses
+            if context.courses:
+                input_text += f"- Completed Courses: {len(context.courses)}\n"
 
         input_text += f"\nProgram: {program_id.upper()}"
 

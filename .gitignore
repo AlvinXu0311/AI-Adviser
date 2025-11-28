@@ -159,3 +159,5 @@ database/backups/*.dump
 frontend/.vscode
 .python-version
 .ruff_cache/
+.tunnel_pids
+deployment-urls.txt

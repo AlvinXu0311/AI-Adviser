@@ -65,11 +65,13 @@ class ExtractedTranscriptData(BaseModel):
 class ExtractTranscriptRequest(BaseModel):
     """Schema for transcript extraction request"""
     pdf_base64: str = Field(..., description="Base64 encoded PDF file content")
+    session_id: str = Field(..., description="Unique session identifier from the frontend")
 
     class Config:
         json_schema_extra = {
             "example": {
-                "pdf_base64": "JVBERi0xLjQKJeLj... (truncated for brevity)"
+                "pdf_base64": "JVBERi0xLjQKJeLj... (truncated for brevity)",
+                "session_id": "abc123-def456-ghi789"
             }
         }
 

@@ -173,7 +173,9 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
     }));
 
     try {
-      const result = await chatService.extractTranscript(file);
+      // Ensure session ID is created before upload so transcript is linked to this session
+      const sessionId = ensureSessionId();
+      const result = await chatService.extractTranscript(file, sessionId);
       const summaryLines: string[] = [];
       if (result.success && result.data) {
         const data = result.data;

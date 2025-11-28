@@ -72,7 +72,7 @@ export async function streamChat(
 }
 
 // Upload a transcript PDF as base64 to `/api/extract-transcript` and return the JSON response.
-export async function extractTranscript(file: File) {
+export async function extractTranscript(file: File, sessionId: string) {
   // Helper to read file as base64
   const toBase64 = (f: File) =>
     new Promise<string>((resolve, reject) => {
@@ -92,7 +92,7 @@ export async function extractTranscript(file: File) {
   const res = await fetch(`${API_BASE_URL}/api/extract-transcript`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pdf_base64: b64 }),
+    body: JSON.stringify({ pdf_base64: b64, session_id: sessionId }),
   });
 
   if (!res.ok) {

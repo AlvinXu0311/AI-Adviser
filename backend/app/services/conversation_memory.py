@@ -13,14 +13,24 @@ from langchain_community.chat_message_histories import RedisChatMessageHistory
 logger = logging.getLogger(__name__)
 
 
+# Default TTL: 24 hours (in seconds)
+DEFAULT_SESSION_TTL = int(os.getenv("REDIS_SESSION_TTL", 86400))  # 24 hours
+# Max messages per session to prevent unbounded growth
+MAX_MESSAGES_PER_SESSION = int(os.getenv("REDIS_MAX_MESSAGES", 100))
+
+
 class RedisConversationMemory:
     """
     Redis-backed conversation memory manager.
     Uses LangChain's RedisChatMessageHistory for standard message storage.
     Provides session-based conversation management with persistence.
+    
+    Expiration strategies:
+    - TTL: Sessions expire after REDIS_SESSION_TTL seconds (default: 24 hours)
+    - Max messages: Oldest messages pruned when exceeding REDIS_MAX_MESSAGES
     """
 
-    def __init__(self, redis_host: str = "localhost", redis_port: int = 6379, redis_db: int = 0):
+    def __init__(self, redis_host: str = "localhost", redis_port: int = 6379, redis_db: int = 0, session_ttl: int = None):
         """
         Initialize Redis conversation memory.
 
@@ -32,6 +42,8 @@ class RedisConversationMemory:
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
+        self.session_ttl = session_ttl or DEFAULT_SESSION_TTL
+        self.max_messages = MAX_MESSAGES_PER_SESSION
 
         # Try to connect to Redis with retries and URL support
         # Per policy: Redis is required. If Redis is not available, raise an exception.
@@ -144,13 +156,47 @@ class RedisConversationMemory:
         """Add a user message to conversation history"""
         history = self.get_chat_history(session_id)
         history.add_user_message(message)
+        self._refresh_ttl(session_id)
+        self._prune_if_needed(session_id)
         logger.debug(f"Added user message to session {session_id}")
 
     def add_ai_message(self, session_id: str, message: str) -> None:
         """Add an AI message to conversation history"""
         history = self.get_chat_history(session_id)
         history.add_ai_message(message)
+        self._refresh_ttl(session_id)
+        self._prune_if_needed(session_id)
         logger.debug(f"Added AI message to session {session_id}")
+
+    def _refresh_ttl(self, session_id: str) -> None:
+        """
+        Refresh TTL for session on every message.
+        This keeps active sessions alive while inactive ones expire.
+        """
+        try:
+            # RedisChatMessageHistory uses key pattern: message_store:{session_id}
+            key = f"message_store:{session_id}"
+            self.redis_client.expire(key, self.session_ttl)
+            logger.debug(f"Refreshed TTL for session {session_id}: {self.session_ttl}s")
+        except Exception as e:
+            logger.warning(f"Failed to refresh TTL for {session_id}: {e}")
+
+    def _prune_if_needed(self, session_id: str) -> None:
+        """
+        Prune oldest messages if session exceeds max_messages limit.
+        Keeps memory bounded per session.
+        """
+        try:
+            key = f"message_store:{session_id}"
+            msg_count = self.redis_client.llen(key)
+            if msg_count > self.max_messages:
+                # Remove oldest messages (from the left of the list)
+                excess = msg_count - self.max_messages
+                for _ in range(excess):
+                    self.redis_client.lpop(key)
+                logger.info(f"Pruned {excess} old messages from session {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to prune messages for {session_id}: {e}")
 
     def get_messages(self, session_id: str) -> List[BaseMessage]:
         """Get all messages in conversation history"""
@@ -223,32 +269,57 @@ class RedisConversationMemory:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get conversation memory statistics"""
-        if self.redis_available:
+        try:
+            # Count message_store:* keys (conversation sessions)
             try:
-                # Use SCAN iterator to avoid blocking Redis for large keyspaces
-                try:
-                    session_count = sum(1 for _ in self.redis_client.scan_iter())
-                except Exception:
-                    # Fallback to KEYS if SCAN not supported
-                    keys = self.redis_client.keys("*")
-                    session_count = len(keys)
+                session_count = sum(1 for _ in self.redis_client.scan_iter(match="message_store:*"))
+            except Exception:
+                keys = self.redis_client.keys("message_store:*")
+                session_count = len(keys)
 
-                return {
-                    "status": "redis_connected",
-                    "redis_host": self.redis_host,
-                    "redis_port": self.redis_port,
-                    "active_sessions": session_count,
-                    "backend": "redis"
-                }
-            except Exception as e:
-                logger.error(f"Error getting Redis stats: {str(e)}")
-                return {"status": "error", "error": str(e)}
-        else:
             return {
-                "status": "in_memory_fallback",
-                "active_sessions": len(self.in_memory_store),
-                "backend": "in_memory"
+                "status": "redis_connected",
+                "redis_host": self.redis_host,
+                "redis_port": self.redis_port,
+                "active_sessions": session_count,
+                "session_ttl_seconds": self.session_ttl,
+                "max_messages_per_session": self.max_messages,
+                "backend": "redis"
             }
+        except Exception as e:
+            logger.error(f"Error getting Redis stats: {str(e)}")
+            return {"status": "error", "error": str(e)}
+
+    def cleanup_expired_sessions(self) -> int:
+        """
+        Manually trigger cleanup of expired sessions.
+        Redis handles TTL automatically, but this can force immediate cleanup.
+        Returns: Number of sessions cleaned up
+        """
+        # Redis automatically removes expired keys, this is informational
+        try:
+            before_count = sum(1 for _ in self.redis_client.scan_iter(match="message_store:*"))
+            # Force key expiration check
+            for key in self.redis_client.scan_iter(match="message_store:*"):
+                self.redis_client.ttl(key)  # Accessing key triggers expiration check
+            after_count = sum(1 for _ in self.redis_client.scan_iter(match="message_store:*"))
+            cleaned = before_count - after_count
+            logger.info(f"Session cleanup: {cleaned} expired sessions removed")
+            return cleaned
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            return 0
+
+    def get_session_ttl_remaining(self, session_id: str) -> int:
+        """
+        Get remaining TTL for a session in seconds.
+        Returns: -2 if key doesn't exist, -1 if no TTL set, otherwise seconds remaining
+        """
+        try:
+            key = f"message_store:{session_id}"
+            return self.redis_client.ttl(key)
+        except Exception:
+            return -2
 
 
 class InMemoryChatHistory:

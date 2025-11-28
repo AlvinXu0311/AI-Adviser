@@ -1,403 +1,241 @@
 """
-Context Manager Service for managing shared cache/memory between PDF and Chat LLM services.
-Stores student context, chat history, and provides efficient access to cached information.
+Context Manager Service - Session-based storage for student transcript data.
+
+Each browser session gets its own isolated student context, preventing data leakage
+between different users.
+
+Expiration: Sessions expire after CONTEXT_TTL_SECONDS (default: 24 hours).
 """
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
+from contextvars import ContextVar
 from datetime import datetime, timedelta
-import json
-from ..schemas.transcript import ExtractedTranscriptData, CourseInfo, ProgramInfo
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+# Default TTL: 24 hours (in seconds)
+CONTEXT_TTL_SECONDS = int(os.getenv("CONTEXT_TTL_SECONDS", 86400))  # 24 hours
+# Max sessions to keep in memory
+MAX_CONTEXT_SESSIONS = int(os.getenv("MAX_CONTEXT_SESSIONS", 1000))
+
+# Context variable to store current session_id for tool access
+current_session_id: ContextVar[Optional[str]] = ContextVar('current_session_id', default=None)
+
+
+def set_current_session(session_id: str) -> None:
+    """Set the current session ID for tool access."""
+    current_session_id.set(session_id)
+
+
+def get_current_session() -> Optional[str]:
+    """Get the current session ID for tool access."""
+    return current_session_id.get()
+
+
+class StudentContext:
+    """Stores extracted transcript data for a single student session."""
+    
+    def __init__(self):
+        self.student_name: Optional[str] = None
+        self.student_id: Optional[str] = None
+        self.email: Optional[str] = None
+        self.degree_program: Optional[str] = None
+        self.gpa: Optional[float] = None
+        self.courses: list[dict] = []
+        self.transcript_text: Optional[str] = None
+        self.raw_data: Optional[Dict[str, Any]] = None
+        self.created_at: datetime = datetime.now()
+        self.last_accessed: datetime = datetime.now()
+    
+    def touch(self) -> None:
+        """Update last accessed time to keep session alive."""
+        self.last_accessed = datetime.now()
+    
+    def is_expired(self, ttl_seconds: int = CONTEXT_TTL_SECONDS) -> bool:
+        """Check if this context has expired."""
+        return datetime.now() - self.last_accessed > timedelta(seconds=ttl_seconds)
+    
+    def update_from_transcript(self, transcript_data: Dict[str, Any]) -> None:
+        """Update context from extracted transcript data."""
+        self.student_name = transcript_data.get("student_name")
+        self.student_id = transcript_data.get("student_id")
+        self.email = transcript_data.get("email")
+        self.degree_program = transcript_data.get("degree_program")
+        self.gpa = transcript_data.get("gpa")
+        self.courses = transcript_data.get("courses", [])
+        self.transcript_text = transcript_data.get("transcript_text")
+        self.raw_data = transcript_data
+    
+    def get_completed_courses(self) -> list[str]:
+        """Get list of completed course names."""
+        return [course.get("course_name", "") for course in self.courses if course.get("course_name")]
+    
+    def get_courses_by_grade(self, min_grade: str = "D") -> list[dict]:
+        """Get courses that meet minimum grade requirement."""
+        grade_order = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"]
+        min_index = grade_order.index(min_grade) if min_grade in grade_order else len(grade_order)
+        return [
+            course for course in self.courses
+            if course.get("grade") in grade_order[:min_index + 1]
+        ]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert context to dictionary for serialization."""
+        return {
+            "student_name": self.student_name,
+            "student_id": self.student_id,
+            "email": self.email,
+            "degree_program": self.degree_program,
+            "gpa": self.gpa,
+            "courses": self.courses,
+            "transcript_text": self.transcript_text
+        }
+    
+    def has_transcript(self) -> bool:
+        """Check if transcript data has been uploaded."""
+        return bool(self.courses) or bool(self.transcript_text)
 
 
 class ContextManager:
-    """Manages shared context and cache for PDF and Chat LLM services"""
-
-    def __init__(self, cache_ttl_minutes: int = 60):
+    """
+    Session-based context manager with automatic expiration.
+    
+    Stores student context per session_id, ensuring each browser session
+    has isolated data.
+    
+    Expiration strategies:
+    - TTL: Sessions expire after CONTEXT_TTL_SECONDS (default: 24 hours)
+    - Max sessions: Oldest sessions evicted when exceeding MAX_CONTEXT_SESSIONS
+    """
+    
+    def __init__(self, ttl_seconds: int = None, max_sessions: int = None):
+        # Dictionary mapping session_id to StudentContext
+        self._sessions: Dict[str, StudentContext] = {}
+        self.ttl_seconds = ttl_seconds or CONTEXT_TTL_SECONDS
+        self.max_sessions = max_sessions or MAX_CONTEXT_SESSIONS
+    
+    def _cleanup_expired(self) -> int:
+        """Remove expired sessions. Called automatically on access."""
+        expired = [
+            sid for sid, ctx in self._sessions.items()
+            if ctx.is_expired(self.ttl_seconds)
+        ]
+        for sid in expired:
+            del self._sessions[sid]
+        if expired:
+            logger.info(f"Cleaned up {len(expired)} expired sessions")
+        return len(expired)
+    
+    def _evict_oldest_if_needed(self) -> None:
+        """Evict oldest sessions if exceeding max_sessions limit (LRU policy)."""
+        if len(self._sessions) >= self.max_sessions:
+            # Sort by last_accessed, evict oldest 10%
+            sorted_sessions = sorted(
+                self._sessions.items(),
+                key=lambda x: x[1].last_accessed
+            )
+            evict_count = max(1, len(sorted_sessions) // 10)
+            for sid, _ in sorted_sessions[:evict_count]:
+                del self._sessions[sid]
+            logger.info(f"Evicted {evict_count} oldest sessions (LRU)")
+    
+    def get_student_context(self, session_id: str) -> StudentContext:
         """
-        Initialize context manager with optional TTL for cache.
-
+        Get or create student context for a session.
+        
         Args:
-            cache_ttl_minutes: Time-to-live for cached data in minutes
-        """
-        self.cache_ttl = timedelta(minutes=cache_ttl_minutes)
-        self.student_context: Optional[ExtractedTranscriptData] = None
-        self.context_timestamp: Optional[datetime] = None
-        self.chat_history: List[Dict[str, Any]] = []
-        print("[ContextManager] Initialized context manager")
-
-    def set_student_context(self, context: ExtractedTranscriptData) -> None:
-        """
-        Store student context from PDF extraction.
-        This context is shared with chat service.
-
-        Args:
-            context: Extracted transcript data
-        """
-        self.student_context = context
-        self.context_timestamp = datetime.now()
-        print(f"\n[ContextManager] Stored student context:")
-        print(f"   - Student: {context.student_name}")
-        print(f"   - ID: {context.student_id}")
-        print(f"   - GPA: {context.gpa}")
-        print(f"   - Program: {context.program_info.program_name if context.program_info else 'N/A'}")
-        print(f"   - Completed Courses: {len(context.completed_courses) if context.completed_courses else 0}")
-        if context.completed_courses:
-            for c in context.completed_courses:
-                print(f"       - {c.course_code}: {c.course_name} (Grade: {c.grade})")
-        print(f"   - Current Courses: {len(context.current_courses) if context.current_courses else 0}")
-        if context.current_courses:
-            for c in context.current_courses:
-                print(f"       - {c.course_code}: {c.course_name}")
-
-    def get_student_context(self) -> Optional[ExtractedTranscriptData]:
-        """
-        Get cached student context.
-
+            session_id: The unique session identifier from the frontend
+            
         Returns:
-            Cached student context or None if expired/not set
+            StudentContext for this session
         """
-        if self.student_context is None:
-            return None
-
-        # Check if cache is expired
-        if self.context_timestamp and datetime.now() - self.context_timestamp > self.cache_ttl:
-            print("[ContextManager] Student context cache expired")
-            self.student_context = None
-            return None
-
-        print(f"[ContextManager] Retrieved cached student context")
-        return self.student_context
-
-    def add_chat_message(self, role: str, content: str) -> None:
-        """
-        Add message to chat history.
-
-        Args:
-            role: "user" or "assistant"
-            content: Message content
-        """
-        message = {
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        }
-        self.chat_history.append(message)
-        print(f"📝 [ContextManager] Added {role} message to history (total: {len(self.chat_history)})")
-
-    def get_chat_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Get chat history.
-
-        Args:
-            limit: Optional limit on number of messages to return
-
-        Returns:
-            List of chat messages
-        """
-        if limit:
-            return self.chat_history[-limit:]
-        return self.chat_history
-
-    def clear_chat_history(self) -> None:
-        """Clear chat history."""
-        self.chat_history.clear()
-        print(" [ContextManager] Cleared chat history")
-
-    def get_context_summary(self) -> Dict[str, Any]:
-        """
-        Get summary of current context for use in prompts.
-
-        Returns:
-            Dictionary with student context summary
-        """
-        context = self.get_student_context()
-        if not context:
-            return {}
-
-        summary = {
-            "student_name": context.student_name,
-            "student_id": context.student_id,
-            "gpa": context.gpa,
-            "program": context.program_info.program_name if context.program_info else None,
-            "completed_courses_count": len(context.completed_courses) if context.completed_courses else 0,
-            "current_courses_count": len(context.current_courses) if context.current_courses else 0,
-            "completed_courses": [
-                {
-                    "code": c.course_code,
-                    "name": c.course_name,
-                    "credits": c.credits,
-                    "grade": c.grade
-                }
-                for c in (context.completed_courses or [])
-            ] if context.completed_courses else [],
-            "current_courses": [
-                {
-                    "code": c.course_code,
-                    "name": c.course_name,
-                    "credits": c.credits
-                }
-                for c in (context.current_courses or [])
-            ] if context.current_courses else []
-        }
-
-        print(f"[ContextManager] Generated context summary")
-        return summary
-
-    def get_context_for_prompt(self) -> str:
-        """
-        Get context as formatted string for including in LLM prompts.
-
-        Returns:
-            Formatted context string
-        """
-        summary = self.get_context_summary()
-        if not summary:
-            return "No student context available."
-
-        courses_str = ""
-        if summary.get("completed_courses"):
-            courses_str = "\n**Completed Courses:**\n"
-            for c in summary["completed_courses"]:
-                courses_str += f"  - {c['code']}: {c['name']} ({c['credits']} credits, Grade: {c['grade']})\n"
-
-        context_str = f"""
-**Student Information:**
-- Name: {summary.get('student_name', 'N/A')}
-- Student ID: {summary.get('student_id', 'N/A')}
-- GPA: {summary.get('gpa', 'N/A')}
-- Program: {summary.get('program', 'N/A')}
-
-**Academic Status:**
-- Completed Courses: {summary.get('completed_courses_count', 0)}
-- Current Courses: {summary.get('current_courses_count', 0)}
-{courses_str}
-"""
-        return context_str
-
-    def is_context_available(self) -> bool:
-        """Check if student context is available and not expired."""
-        return self.get_student_context() is not None
-
-    def get_academic_progress(self) -> Dict[str, Any]:
-        """
-        Evaluate student's academic progress based on ACTUAL TRANSCRIPT DATA.
-        Focuses on course quality, grades, and specific course requirements - not just credit counts.
-
-        Returns:
-            Dictionary with detailed progress evaluation based on transcript
-        """
-        context = self.get_student_context()
-        if not context:
-            return {}
-
-        # Analyze completed courses - focus on quality and grades
-        completed_courses_list = []
-        failed_courses = []
-        strong_courses = []  # A or A-
-
-        if context.completed_courses:
-            for course in context.completed_courses:
-                course_info = {
-                    "code": course.course_code,
-                    "name": course.course_name,
-                    "credits": course.credits or 0,
-                    "grade": course.grade
-                }
-                completed_courses_list.append(course_info)
-
-                # Categorize by performance
-                if course.grade:
-                    grade_upper = course.grade.upper()
-                    if grade_upper.startswith('F') or grade_upper == 'D':
-                        failed_courses.append(course_info)
-                    elif grade_upper.startswith('A'):
-                        strong_courses.append(course_info)
-
-        # Analyze current courses - focus on course types and sequence
-        current_courses_list = []
-        current_credits = 0
-
-        if context.current_courses:
-            for course in context.current_courses:
-                credits = course.credits or 0
-                current_credits += credits
-                current_courses_list.append({
-                    "code": course.course_code,
-                    "name": course.course_name,
-                    "credits": credits
-                })
-
-        # Build comprehensive progress evaluation
-        progress = {
-            # Student info
-            "student_name": context.student_name,
-            "gpa": context.gpa,
-            "program": context.program_info.program_name if context.program_info else None,
-
-            # Completed courses - detailed breakdown
-            "completed_courses": completed_courses_list,
-            "completed_course_count": len(completed_courses_list),
-            "strong_performance_courses": strong_courses,
-            "failed_courses": failed_courses,
-
-            # Current courses
-            "current_courses": current_courses_list,
-            "current_course_count": len(current_courses_list),
-            "current_credits": current_credits,
-
-            # Academic status evaluation
-            "academic_performance": self._evaluate_academic_performance(context.gpa, failed_courses, strong_courses),
-            "course_progression": self._evaluate_course_progression(completed_courses_list, current_courses_list),
-            "academic_standing": self._evaluate_academic_standing(context.gpa, failed_courses),
-
-            # Detailed summary
-            "summary": self._generate_detailed_summary(context, completed_courses_list, current_courses_list, failed_courses)
-        }
-
-        print(f"\n[ContextManager] Academic Progress Evaluation:")
-        print(f"   - Student: {progress['student_name']}")
-        print(f"   - GPA: {progress['gpa']}")
-        print(f"   - Program: {progress['program']}")
-        print(f"   - Completed Courses: {progress['completed_course_count']}")
-        print(f"   - Current Courses: {progress['current_course_count']}")
-        print(f"   - Academic Performance: {progress['academic_performance']}")
-        print(f"   - Academic Standing: {progress['academic_standing']}")
-        print(f"   - Course Progression: {progress['course_progression']}")
-        if failed_courses:
-            print(f"   [WARNING] Failed/Low Courses: {len(failed_courses)}")
-
-        return progress
-
-    def _evaluate_academic_performance(self, gpa: Optional[float], failed_courses: list, strong_courses: list) -> str:
-        """
-        Evaluate overall academic performance based on GPA, grades, and course quality.
-
-        Args:
-            gpa: Student's GPA
-            failed_courses: List of failed/D grade courses
-            strong_courses: List of A/A- grade courses
-
-        Returns:
-            Performance assessment
-        """
-        if not gpa:
-            return "Insufficient data"
-
-        if failed_courses:
-            return "Needs Improvement (has failed courses)"
-
-        if gpa >= 3.7:
-            return "Excellent (3.7+ GPA)"
-        elif gpa >= 3.5:
-            return "Very Good (3.5-3.7 GPA)"
-        elif gpa >= 3.0:
-            return "Good (3.0-3.5 GPA)"
-        elif gpa >= 2.7:
-            return "Satisfactory (2.7-3.0 GPA)"
+        # Periodic cleanup (every access)
+        self._cleanup_expired()
+        
+        if session_id not in self._sessions:
+            self._evict_oldest_if_needed()
+            logger.info(f"Creating new student context for session: {session_id[:8]}...")
+            self._sessions[session_id] = StudentContext()
         else:
-            return "At Risk (below 2.7 GPA)"
-
-    def _evaluate_academic_standing(self, gpa: Optional[float], failed_courses: list) -> str:
+            # Touch to keep alive
+            self._sessions[session_id].touch()
+        
+        return self._sessions[session_id]
+    
+    def set_student_context(self, session_id: str, transcript_data: Dict[str, Any]) -> None:
         """
-        Evaluate academic standing based on GPA and failed courses.
-
+        Set student context from extracted transcript data.
+        
         Args:
-            gpa: Student's GPA
-            failed_courses: List of failed courses
-
-        Returns:
-            Academic standing status
+            session_id: The unique session identifier
+            transcript_data: Extracted transcript data dictionary
         """
-        if failed_courses:
-            return "Probation/Warning (has failed courses)"
-
-        if not gpa:
-            return "Unknown"
-
-        if gpa >= 3.0:
-            return "Good Standing"
-        elif gpa >= 2.0:
-            return "Satisfactory Standing"
-        else:
-            return "Academic Probation"
-
-    def _evaluate_course_progression(self, completed_courses: list, current_courses: list) -> str:
+        context = self.get_student_context(session_id)
+        context.update_from_transcript(transcript_data)
+        context.touch()
+        logger.info(f"Updated student context for session {session_id[:8]}... "
+                   f"Student: {context.student_name}, Courses: {len(context.courses)}")
+    
+    def clear_student_context(self, session_id: str) -> None:
         """
-        Evaluate course progression and sequence based on completed and current courses.
-
+        Clear student context for a session.
+        
         Args:
-            completed_courses: List of completed courses
-            current_courses: List of current courses
-
-        Returns:
-            Course progression assessment
+            session_id: The unique session identifier
         """
-        if not completed_courses:
-            return "Just Starting"
-
-        if len(current_courses) == 0:
-            return "Completed (No current courses)"
-
-        if len(completed_courses) < 3:
-            return "Early Stage"
-        elif len(completed_courses) < 7:
-            return "Mid-Program"
-        else:
-            return "Advanced"
-
-    def _generate_detailed_summary(self, context, completed_courses: list, current_courses: list, failed_courses: list) -> str:
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+            logger.info(f"Cleared student context for session: {session_id[:8]}...")
+    
+    def has_context(self, session_id: str) -> bool:
         """
-        Generate a detailed academic summary based on actual course data.
-
+        Check if a session has transcript data.
+        
         Args:
-            context: Student context from transcript
-            completed_courses: List of completed courses
-            current_courses: List of current courses
-            failed_courses: List of failed courses
-
+            session_id: The unique session identifier
+            
         Returns:
-            Detailed summary string
+            True if session has uploaded transcript data
         """
-        summary = f"Academic Summary for {context.student_name}:\n"
-
-        # Program and GPA
-        if context.program_info:
-            summary += f"Program: {context.program_info.program_name}\n"
-        if context.gpa:
-            summary += f"GPA: {context.gpa}/4.0\n"
-
-        # Course progress
-        summary += f"\nCourse Progress:\n"
-        summary += f"- Completed: {len(completed_courses)} courses\n"
-        summary += f"- Currently Taking: {len(current_courses)} courses\n"
-
-        # Specific course details
-        if completed_courses:
-            summary += f"\nCompleted Courses:\n"
-            for course in completed_courses:
-                summary += f"  • {course['code']}: {course['name']} (Grade: {course['grade']}, Credits: {course['credits']})\n"
-
-        if current_courses:
-            summary += f"\nCurrent Courses:\n"
-            for course in current_courses:
-                summary += f"  • {course['code']}: {course['name']} (Credits: {course['credits']})\n"
-
-        # Warning about failed courses
-        if failed_courses:
-            summary += f"\n[WARNING] Failed Courses:\n"
-            for course in failed_courses:
-                summary += f"  • {course['code']}: {course['name']} (Grade: {course['grade']})\n"
-            summary += f"\nRecommendation: Consider retaking failed courses or seeking academic support.\n"
-
-        return summary
+        if session_id not in self._sessions:
+            return False
+        ctx = self._sessions[session_id]
+        if ctx.is_expired(self.ttl_seconds):
+            del self._sessions[session_id]
+            return False
+        return ctx.has_transcript()
+    
+    def get_session_count(self) -> int:
+        """Get number of active sessions with context."""
+        self._cleanup_expired()
+        return len(self._sessions)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get context manager statistics."""
+        self._cleanup_expired()
+        return {
+            "active_sessions": len(self._sessions),
+            "ttl_seconds": self.ttl_seconds,
+            "max_sessions": self.max_sessions,
+            "sessions_with_transcript": sum(
+                1 for ctx in self._sessions.values() if ctx.has_transcript()
+            )
+        }
+    
+    def cleanup_all_expired(self) -> int:
+        """Manually trigger cleanup of all expired sessions."""
+        return self._cleanup_expired()
 
 
-# Global context manager instance (shared across services)
-_context_manager = None
+# Global singleton instance
+_context_manager: Optional[ContextManager] = None
 
 
 def get_context_manager() -> ContextManager:
-    """Get or create global context manager instance."""
+    """Get the global context manager instance."""
     global _context_manager
     if _context_manager is None:
         _context_manager = ContextManager()
+        logger.info("Initialized session-based ContextManager")
     return _context_manager

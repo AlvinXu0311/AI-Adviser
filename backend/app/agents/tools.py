@@ -25,48 +25,61 @@ def context_lookup_tool(info_type: str = "all") -> str:
     Returns: Empty if no transcript uploaded. Otherwise returns student academic data.
     """
     try:
-        from ..services.context_manager import get_context_manager
+        from ..services.context_manager import get_context_manager, get_current_session
 
         logger.info(f"Context lookup tool invoked for: {info_type}")
 
-        context_manager = get_context_manager()
-        student_context = context_manager.get_student_context()
+        # Get current session ID from context variable
+        session_id = get_current_session()
+        if not session_id:
+            logger.warning("No session ID available in context lookup tool")
+            return "No session context available. Please ensure you're in an active session."
 
-        if not student_context:
-            return "No student context available. Please upload a PDF transcript."
+        context_manager = get_context_manager()
+        student_context = context_manager.get_student_context(session_id)
+
+        if not student_context or not student_context.has_transcript():
+            return "No student transcript uploaded for this session. Please upload a PDF transcript."
 
         result = []
 
         if info_type in ["all", "gpa"]:
-            result.append(f"GPA: {student_context.gpa}/4.0")
+            if student_context.gpa is not None:
+                result.append(f"GPA: {student_context.gpa}/4.0")
 
         if info_type in ["all", "program"]:
-            if student_context.program_info:
-                result.append(f"Program: {student_context.program_info.program_name}")
+            if student_context.degree_program:
+                result.append(f"Program: {student_context.degree_program}")
 
         if info_type in ["all", "courses", "grades"]:
-            if student_context.completed_courses:
+            if student_context.courses:
                 # Build detailed course list with grades
                 course_details = []
-                for course in student_context.completed_courses:
-                    grade_str = f", Grade: {course.grade}" if course.grade else ""
-                    course_details.append(f"{course.course_code} - {course.course_name} ({course.credits} cr{grade_str})")
+                for course in student_context.courses:
+                    course_code = course.get('course_code', 'N/A')
+                    course_name = course.get('course_name', 'Unknown')
+                    credits = course.get('credits', 'N/A')
+                    grade = course.get('grade')
+                    grade_str = f", Grade: {grade}" if grade else ""
+                    course_details.append(f"{course_code} - {course_name} ({credits} cr{grade_str})")
                 completed_list = "\n  - ".join(course_details)
-                result.append(f"Completed Courses ({len(student_context.completed_courses)}):\n  - {completed_list}")
-            if student_context.current_courses:
-                current_details = []
-                for course in student_context.current_courses:
-                    current_details.append(f"{course.course_code} - {course.course_name} ({course.credits} cr)")
-                current_list = "\n  - ".join(current_details)
-                result.append(f"Current Courses ({len(student_context.current_courses)}):\n  - {current_list}")
+                result.append(f"Completed Courses ({len(student_context.courses)}):\n  - {completed_list}")
 
         if info_type in ["all", "progress"]:
-            progress = context_manager.get_academic_progress()
-            if progress:
-                result.append(f"Academic Standing: {progress.get('academic_standing', 'Unknown')}")
-                result.append(f"Course Progression: {progress.get('course_progression', 'Unknown')}")
+            # Simplified progress info
+            if student_context.courses:
+                result.append(f"Total Courses Completed: {len(student_context.courses)}")
+                if student_context.gpa:
+                    if student_context.gpa >= 3.5:
+                        result.append("Academic Standing: Good (Dean's List eligible)")
+                    elif student_context.gpa >= 3.0:
+                        result.append("Academic Standing: Good")
+                    elif student_context.gpa >= 2.0:
+                        result.append("Academic Standing: Satisfactory")
+                    else:
+                        result.append("Academic Standing: Academic Warning")
 
-        return "\n".join(result) if result else "No student context available."
+        return "\n".join(result) if result else "No student transcript data available for this session."
 
     except Exception as e:
         logger.error(f"Error in context lookup tool: {str(e)}")

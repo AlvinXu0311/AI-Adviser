@@ -33,7 +33,7 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
     Also stores the extracted data in context_manager for subsequent chat requests.
 
     Args:
-        request: ExtractTranscriptRequest containing base64 PDF
+        request: ExtractTranscriptRequest containing base64 PDF and session_id
 
     Returns:
         ExtractTranscriptResponse with extracted data or error message
@@ -42,15 +42,37 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
         # Validate request
         if not request.pdf_base64 or len(request.pdf_base64) == 0:
             raise ValueError("PDF data is required")
+        
+        if not request.session_id or len(request.session_id) == 0:
+            raise ValueError("Session ID is required")
 
         # Process PDF
         transcript_data: ExtractedTranscriptData = await get_pdf_service().process_pdf(
             request.pdf_base64
         )
 
-        # Store in context manager for subsequent chat requests
+        # Store in context manager for subsequent chat requests (session-based)
         context_manager = get_context_manager()
-        context_manager.set_student_context(transcript_data)
+        
+        # Convert Pydantic model to dict for storage
+        transcript_dict = {
+            "student_name": transcript_data.student_name,
+            "student_id": transcript_data.student_id,
+            "gpa": transcript_data.gpa,
+            "degree_program": transcript_data.program_info.program_name if transcript_data.program_info else None,
+            "courses": [
+                {
+                    "course_code": c.course_code,
+                    "course_name": c.course_name,
+                    "credits": c.credits,
+                    "grade": c.grade,
+                    "semester": c.semester
+                }
+                for c in (transcript_data.completed_courses or [])
+            ],
+            "transcript_text": transcript_data.raw_text
+        }
+        context_manager.set_student_context(request.session_id, transcript_dict)
 
         return ExtractTranscriptResponse(
             success=True,
