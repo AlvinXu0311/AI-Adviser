@@ -1,21 +1,77 @@
-import { FC } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { 
+import {
   X,
   Sparkles
 } from 'lucide-react';
+import { getSystemStatus, StatusComponent } from '../services/statusService';
 
 interface SidebarProps {
   isOpen: boolean;
   toggleSidebar: () => void;
 }
 
+interface StatusLight {
+  label: string;
+  state: string;
+  color: string;
+}
+
 export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
-  const statusLights = [
-    { label: 'Vector DB', state: 'Online', color: 'bg-emerald-400' },
-    { label: 'Gemini', state: 'Ready', color: 'bg-sky-400' },
-    { label: 'Streaming', state: 'Live', color: 'bg-amber-300' },
-  ];
+  const [statusLights, setStatusLights] = useState<StatusLight[]>([
+    { label: 'Vector DB', state: 'Loading', color: 'bg-gray-400' },
+    { label: 'Gemini', state: 'Loading', color: 'bg-gray-400' },
+    { label: 'Streaming', state: 'Loading', color: 'bg-gray-400' },
+  ]);
+
+  useEffect(() => {
+    // Fetch initial status
+    fetchStatus();
+
+    // Poll status every 30 seconds
+    const interval = setInterval(fetchStatus, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchStatus = async () => {
+    try {
+      const status = await getSystemStatus();
+
+      // Map components to status lights
+      const newStatusLights: StatusLight[] = status.components.map((component: StatusComponent) => {
+        const isOnline = component.status === 'online';
+
+        // Determine color and state based on component key
+        let color = isOnline ? 'bg-emerald-400' : 'bg-red-400';
+        let state = isOnline ? 'Online' : 'Offline';
+
+        if (component.key === 'gemini') {
+          color = isOnline ? 'bg-sky-400' : 'bg-red-400';
+          state = isOnline ? 'Ready' : 'Offline';
+        } else if (component.key === 'streaming') {
+          color = isOnline ? 'bg-amber-300' : 'bg-red-400';
+          state = isOnline ? 'Live' : 'Offline';
+        }
+
+        return {
+          label: component.label,
+          state,
+          color,
+        };
+      });
+
+      setStatusLights(newStatusLights);
+    } catch (error) {
+      console.error('Failed to fetch system status:', error);
+      // Set all to error state
+      setStatusLights([
+        { label: 'Vector DB', state: 'Error', color: 'bg-red-400' },
+        { label: 'Gemini', state: 'Error', color: 'bg-red-400' },
+        { label: 'Streaming', state: 'Error', color: 'bg-red-400' },
+      ]);
+    }
+  };
 
   return (
     <motion.div

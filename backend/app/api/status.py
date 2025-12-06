@@ -6,8 +6,7 @@ from typing import Dict
 
 from fastapi import APIRouter
 
-# DEPRECATED: RAG service no longer used - Database-First architecture
-# from ..services.rag_service import get_rag_service
+from ..services.vector_search_service import get_vector_search_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,27 +27,48 @@ def _status_payload(
     }
 
 
-# DEPRECATED: Vector DB check no longer needed - Database-First architecture
-# def _check_vector_db() -> Dict[str, str]:
-#     """Verify the in-memory RAG index is ready."""
-#     try:
-#         rag_service = get_rag_service()
-#         documents = getattr(rag_service, "documents", []) or []
-#         bm25_ready = getattr(rag_service, "bm25", None) is not None
-#
-#         if documents and bm25_ready:
-#             return _status_payload(
-#                 "vector_db",
-#                 "Vector DB",
-#                 "online",
-#                 f"Indexed documents: {len(documents)}"
-#             )
-#
-#         reason = "BM25 index unavailable" if not bm25_ready else "No documents loaded"
-#         return _status_payload("vector_db", "Vector DB", "offline", reason)
-#     except Exception as exc:  # pragma: no cover - defensive logging
-#         logger.exception("Vector DB status check failed")
-#         return _status_payload("vector_db", "Vector DB", "offline", str(exc))
+def _check_vector_db() -> Dict[str, str]:
+    """Verify the ChromaDB vector search service is ready."""
+    try:
+        vector_service = get_vector_search_service()
+
+        # Check if collections are initialized and have data
+        collections = getattr(vector_service, "collections", {})
+        if not collections:
+            return _status_payload(
+                "vector_db",
+                "Vector DB",
+                "offline",
+                "Collections not initialized"
+            )
+
+        # Count total indexed items across all collections
+        total_items = 0
+        collection_details = []
+
+        for entity_type, collection in collections.items():
+            count = collection.count()
+            total_items += count
+            collection_details.append(f"{entity_type.value}: {count}")
+
+        if total_items > 0:
+            details = f"Indexed {total_items} items ({', '.join(collection_details)})"
+            return _status_payload(
+                "vector_db",
+                "Vector DB",
+                "online",
+                details
+            )
+
+        return _status_payload(
+            "vector_db",
+            "Vector DB",
+            "offline",
+            "No documents indexed"
+        )
+    except Exception as exc:
+        logger.exception("Vector DB status check failed")
+        return _status_payload("vector_db", "Vector DB", "offline", str(exc))
 
 
 def _check_gemini() -> Dict[str, str]:
@@ -74,20 +94,20 @@ def _check_gemini() -> Dict[str, str]:
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     try:
-        from google import genai  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
+        from langchain_google_genai import ChatGoogleGenerativeAI
+    except Exception as exc:
         return _status_payload("gemini", "Gemini", "offline", f"SDK missing: {exc}")
 
     try:
-        client = genai.Client(api_key=api_key)
-        probe_text = "health check"
+        # Use LangChain's ChatGoogleGenerativeAI for health check
+        # API key is automatically picked up from GOOGLE_API_KEY env var
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=0
+        )
 
-        # Prefer low-cost token counting; fall back to tiny generation if unavailable
-        count_tokens = getattr(client.models, "count_tokens", None)
-        if callable(count_tokens):
-            count_tokens(model=model_name, contents=probe_text)
-        else:
-            client.models.generate_content(model=model_name, contents=probe_text)
+        # Simple invoke test - lightweight
+        _ = llm.invoke("test")
 
         return _status_payload(
             "gemini",
@@ -95,9 +115,13 @@ def _check_gemini() -> Dict[str, str]:
             "online",
             f"Model {model_name} reachable"
         )
-    except Exception as exc:  # pragma: no cover - external dependency
+    except Exception as exc:
         logger.exception("Gemini status check failed")
-        return _status_payload("gemini", "Gemini", "offline", str(exc))
+        error_msg = str(exc)
+        # Truncate error message if too long
+        if len(error_msg) > 100:
+            error_msg = error_msg[:100] + "..."
+        return _status_payload("gemini", "Gemini", "offline", error_msg)
 
 
 def _check_streaming() -> Dict[str, str]:
@@ -123,9 +147,8 @@ def _check_streaming() -> Dict[str, str]:
 @router.get("/status")
 async def get_system_status():
     """Return health for the core subsystems used by the adviser."""
-    # Database-First architecture - Vector DB check no longer needed
     components = [
-        # _check_vector_db(),  # DEPRECATED: RAG removed
+        _check_vector_db(),
         _check_gemini(),
         _check_streaming(),
     ]
