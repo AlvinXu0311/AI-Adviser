@@ -12,6 +12,13 @@ export enum AgentStatus {
   GENERATING = 'generating'
 }
 
+// User authentication type
+export interface User {
+  email: string;
+  name: string;
+  loginTime: Date;
+}
+
 export interface Citation {
   id: string;
   title: string;

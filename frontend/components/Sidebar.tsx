@@ -2,13 +2,18 @@ import { FC, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   X,
-  Sparkles
+  Sparkles,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { getSystemStatus, StatusComponent } from '../services/statusService';
+import { User } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
   toggleSidebar: () => void;
+  user?: User;
+  onLogout?: () => void;
 }
 
 interface StatusLight {
@@ -17,7 +22,7 @@ interface StatusLight {
   color: string;
 }
 
-export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
+export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar, user, onLogout }) => {
   const [statusLights, setStatusLights] = useState<StatusLight[]>([
     { label: 'Vector DB', state: 'Loading', color: 'bg-gray-400' },
     { label: 'Gemini', state: 'Loading', color: 'bg-gray-400' },
@@ -121,6 +126,32 @@ export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
           </div>
         </div>
       </div>
+
+      {/* User Profile & Logout Section */}
+      {user && (
+        <div className="p-4 border-t border-white/10">
+          <div className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-wpi-red rounded-full flex items-center justify-center">
+                <UserIcon className="w-5 h-5 text-white" />
+              </div>
+              <div className="overflow-hidden">
+                <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                <p className="text-xs text-gray-400 truncate">{user.email}</p>
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 rounded-lg transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };
