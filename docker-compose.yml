@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # Redis for session management and caching
+  redis:
+    image: redis:7-alpine
+    container_name: ai-adviser-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-adviser-network
+
+  # Backend API service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-adviser-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Configuration
+      - LLM_PROVIDER=google
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=gemini-2.5-flash
+
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+
+      # CORS Configuration (allow frontend access from browser)
+      - ALLOW_ALL_ORIGINS=false
+      - FRONTEND_URL=http://localhost:8080,http://localhost:3000,http://localhost:5173
+
+      # Other settings
+      - STREAMING_DISABLED=false
+      - LANGCHAIN_DEBUG=false
+
+      # Embedding provider (google or local)
+      - EMBEDDING_PROVIDER=google
+      
+      # Database path (for Docker container)
+      - BUS_SCHOOL_DB_PATH=/app/database/database_project/bus_school.db
+    volumes:
+      # Mount database directory
+      - ./database:/app/database
+      # Mount vector DB for persistence
+      - vector_db:/app/vector_db
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ai-adviser-network
+
+  # Frontend service with Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-adviser-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ai-adviser-network
+
+networks:
+  ai-adviser-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+  vector_db:
+    driver: local

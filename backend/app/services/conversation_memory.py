@@ -99,7 +99,6 @@ class RedisConversationMemory:
     def get_chat_history(self, session_id: str) -> Any:
         """
         Get LangChain-compatible chat history for a session.
-        Uses Redis if available, otherwise in-memory fallback.
 
         Args:
             session_id: Unique session identifier
@@ -107,44 +106,21 @@ class RedisConversationMemory:
         Returns:
             Chat history object for the session
         """
-        # Redis must be available here; otherwise __init__ would have raised.
-        # Try constructing RedisChatMessageHistory and raise on failure.
+        # Build Redis URL from our config to ensure correct host is used in Docker
+        redis_url = os.getenv("REDIS_URL") or f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        
         try:
-            # Different langchain-community versions expect different ctor args.
-            # Try several common constructor signatures for compatibility.
-            constructors = [
-                ("connection", lambda: RedisChatMessageHistory(session_id=session_id, connection=self.redis_client)),
-                ("client", lambda: RedisChatMessageHistory(session_id=session_id, client=self.redis_client)),
-                ("redis_client", lambda: RedisChatMessageHistory(session_id=session_id, redis_client=self.redis_client)),
-                ("redis_url", lambda: RedisChatMessageHistory(session_id=session_id, redis_url=os.getenv("REDIS_URL") or f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}")),
-                ("host_port", lambda: RedisChatMessageHistory(session_id=session_id, host=self.redis_host, port=self.redis_port, db=self.redis_db)),
-                # Fallback: try no args (some versions may pick up default redis settings)
-                ("no_args", lambda: RedisChatMessageHistory(session_id=session_id)),
-            ]
-
-            last_exc = None
-            for name, ctor in constructors:
-                try:
-                    hist = ctor()
-                    logger.debug(f"RedisChatMessageHistory created using signature: {name}")
-                    return hist
-                except TypeError as te:
-                    # Constructor signature mismatch; try next
-                    logger.debug(f"RedisChatMessageHistory ctor '{name}' TypeError: {te}")
-                    last_exc = te
-                    continue
-                except Exception as e:
-                    # Other runtime errors (connection, etc.) — record and try next
-                    logger.debug(f"RedisChatMessageHistory ctor '{name}' raised: {e}")
-                    last_exc = e
-                    continue
-
-            # If none of the constructors worked, raise an error (do not fall back)
-            logger.error(f"Error creating RedisChatMessageHistory with available signatures: {last_exc}")
-            raise RuntimeError(f"Failed to create RedisChatMessageHistory: {last_exc}")
-        except Exception:
-            # Propagate exceptions to the caller — Redis is required.
-            raise
+            # RedisChatMessageHistory uses 'url' parameter
+            hist = RedisChatMessageHistory(
+                session_id=session_id,
+                url=redis_url,
+                ttl=self.session_ttl
+            )
+            logger.debug(f"RedisChatMessageHistory created with url: {redis_url}")
+            return hist
+        except Exception as e:
+            logger.error(f"Failed to create RedisChatMessageHistory: {e}")
+            raise RuntimeError(f"Failed to create RedisChatMessageHistory: {e}")
 
     def _get_in_memory_history(self, session_id: str) -> "InMemoryChatHistory":
         """Get in-memory fallback history"""

@@ -31,7 +31,7 @@ load_dotenv(ENV_PATH)
 logger = logging.getLogger(__name__)
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # /app
 DB_PATH = os.path.join(BASE_DIR, "database", "database_project", "bus_school.db")
 CHROMA_PATH = os.path.join(BASE_DIR, "database", "vector_db")
 

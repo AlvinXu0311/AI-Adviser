@@ -6,16 +6,84 @@ Interactive chatbot platform for academic advising with PDF transcript upload, L
 
 ### Prerequisites
 
-- Node.js 16+ (for frontend)
-- Python 3.8+ (for backend)
-- Google Gemini API key
+- **Option 1: Docker (Recommended for Production)**
+  - Docker Engine 20.10+
+  - Docker Compose 1.29+
+  - Google Gemini API key
 
-### Automatic Start (Recommended)
+- **Option 2: Local Development**
+  - Node.js 16+ (for frontend)
+  - Python 3.8+ (for backend)
+  - Google Gemini API key
+
+### Option 1: Docker Deployment (Recommended)
+
+**Step 1: Install Docker**
+- **Linux**: Install Docker Engine and Docker Compose
+- **macOS**: Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
+- **Windows**: Install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
+
+**Step 2: Deploy**
 
 ```bash
-# Change to project directory
+# 1. Clone the repository
+git clone <repository-url>
 cd AI-Adviser
 
+# 2. Configure environment
+cp .env.example .env
+# Edit .env and add your GOOGLE_API_KEY
+
+# 3. Deploy with Docker Compose
+./docker-deploy.sh
+# Or manually: docker-compose up -d
+# On Windows Git Bash: bash docker-deploy.sh
+
+# 4. Access the application
+# - Frontend: http://localhost
+# - Backend API: http://localhost:8000
+# - API Status: http://localhost:8000/api/status
+
+# Stop services
+docker-compose down
+# Or: sudo docker-compose down (Linux with sudo)
+```
+
+**Platform-Specific Notes:**
+- **Linux**: Script auto-detects if sudo is needed
+- **macOS/Windows**: Ensure Docker Desktop is running before deployment
+- **Windows Users**:
+  - Option 1: Double-click `docker-deploy.bat` in File Explorer
+  - Option 2: Run `bash docker-deploy.sh` in Git Bash
+  - Option 3: Use WSL (Windows Subsystem for Linux)
+
+**Docker Services:**
+- **Frontend**: React + Nginx (Port 80)
+- **Backend**: FastAPI + Python (Port 8000)
+- **Redis**: Session management (Port 6379)
+
+**Docker Commands:**
+```bash
+# View logs
+docker-compose logs -f
+
+# View specific service logs
+docker-compose logs -f backend
+
+# Check service status
+docker-compose ps
+
+# Rebuild and restart
+docker-compose build && docker-compose up -d
+
+# Stop and remove all containers
+docker-compose down -v
+```
+
+### Option 2: Local Development Start
+
+**Automatic (Recommended):**
+```bash
 # Make scripts executable (first time only)
 chmod +x start.sh stop.sh
 
@@ -26,7 +94,7 @@ chmod +x start.sh stop.sh
 ./stop.sh
 ```
 
-### Manual Start
+**Manual:**
 
 **Terminal 1: Backend**
 ```bash
@@ -46,20 +114,22 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-### Access the Application
-
-- **Frontend**: http://localhost:3000
+**Access the Application:**
+- **Frontend** (Local): http://localhost:5173
+- **Frontend** (Docker): http://localhost
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
+- **API Status**: http://localhost:8000/api/status
 
 ## Architecture Overview
 
+### Application Architecture
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                          │
+│                   Frontend (React + Nginx)                       │
 │  - Chat Interface with streaming responses                       │
 │  - PDF transcript upload with Gemini Vision extraction           │
-│  - Real-time agent status indicators                             │
+│  - Real-time system status indicators                            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -69,19 +139,45 @@ npm run dev -- --host 0.0.0.0
 │  ┌─────────────────┐    ┌──────────────────────────────────┐   │
 │  │  Intent Agent   │───▶│       Adviser Agent (ReAct)       │   │
 │  │  (Free-form LLM │    │  - business_school_database tool  │   │
-│  │   Classification)    │  - student_context tool           │   │
-│  └─────────────────┘    │  - assess_complexity tool         │   │
+│  │   Classification)    │  - context_lookup tool            │   │
+│  └─────────────────┘    │  - semantic_search tool           │   │
 │                         └──────────────────────────────────┘   │
 │                                      │                          │
 │                                      ▼                          │
-│                         ┌──────────────────────┐                │
-│                         │   SQLite Database    │                │
-│                         │   (bus_school.db)    │                │
-│                         │  - Programs (3)      │                │
-│                         │  - Specialties (7)   │                │
-│                         │  - Courses (14)      │                │
-│                         └──────────────────────┘                │
+│         ┌──────────────────┐    ┌─────────────────────┐        │
+│         │ SQLite Database  │    │ ChromaDB Vector DB  │        │
+│         │ (bus_school.db)  │    │  (semantic search)  │        │
+│         │  - Programs (3)  │    │  - Courses (103)    │        │
+│         │  - Specialties(7)│    │  - Programs (3)     │        │
+│         │  - Courses (103) │    │  - Specialties (7)  │        │
+│         └──────────────────┘    └─────────────────────┘        │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │      Redis       │
+                    │ (Session Memory) │
+                    └──────────────────┘
+```
+
+### Docker Deployment Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Docker Host                              │
+│                                                               │
+│  ┌────────────────────┐  ┌────────────────────┐             │
+│  │   frontend:80      │  │   backend:8000     │             │
+│  │  (nginx + react)   │──│  (FastAPI+Python)  │             │
+│  └────────────────────┘  └────────────────────┘             │
+│                                    │                          │
+│                          ┌─────────┴─────────┐               │
+│                          │                   │               │
+│                    ┌─────▼──────┐    ┌──────▼─────┐         │
+│                    │ redis:6379 │    │ Volumes:   │         │
+│                    │  (cache)   │    │ - vector_db│         │
+│                    └────────────┘    │ - redis_data│        │
+│                                      └────────────┘         │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -94,47 +190,61 @@ AI-Adviser/
 │   │   ├── MessageBubble.tsx         # Message display with markdown
 │   │   ├── InputArea.tsx             # Text input + file upload + voice
 │   │   ├── Header.tsx                # Top navigation bar
-│   │   └── Sidebar.tsx               # Side panel with status
+│   │   └── Sidebar.tsx               # Side panel with real-time status
 │   ├── services/
-│   │   └── chatService.ts            # API client (streaming + transcript)
+│   │   ├── chatService.ts            # API client (streaming + transcript)
+│   │   └── statusService.ts          # System status API client
 │   ├── assets/
 │   │   └── WPI_ICON.jpg              # WPI logo
 │   ├── App.tsx                       # Application shell
 │   ├── types.ts                      # TypeScript types
 │   ├── constants.ts                  # App constants
-│   └── index.html                    # Entry point
+│   ├── Dockerfile                    # Multi-stage build (Node + Nginx)
+│   ├── nginx.conf                    # Nginx configuration
+│   └── .dockerignore                 # Docker ignore patterns
 │
 ├── backend/                           # FastAPI application
 │   ├── app/
 │   │   ├── agents/
 │   │   │   ├── adviser_agent.py      # ReAct agent with tool use
-│   │   │   ├── intent_agent.py       # Free-form LLM intent classification
-│   │   │   ├── tools.py              # Agent tools (db, context, complexity)
+│   │   │   ├── intent_agent.py       # Intent classification
+│   │   │   ├── tools.py              # Agent tools (db, search, context)
 │   │   │   └── streaming_callback.py # SSE streaming handler
 │   │   ├── api/
 │   │   │   ├── chat.py               # /api/chat endpoint (streaming)
-│   │   │   └── transcript.py         # /api/extract-transcript endpoint
+│   │   │   ├── transcript.py         # /api/extract-transcript
+│   │   │   └── status.py             # /api/status (system health)
 │   │   ├── services/
 │   │   │   ├── program_db_service.py # SQLite database queries
-│   │   │   ├── context_manager.py    # Student transcript caching
+│   │   │   ├── vector_search_service.py # ChromaDB semantic search
+│   │   │   ├── context_manager.py    # Session-isolated context with TTL/LRU
 │   │   │   ├── pdf_extraction_service.py # Gemini Vision PDF extraction
-│   │   │   └── conversation_memory.py # Redis conversation history
+│   │   │   └── conversation_memory.py # Redis chat history with TTL
 │   │   ├── schemas/
 │   │   │   ├── chat.py               # Chat request/response models
 │   │   │   └── transcript.py         # Transcript data models
 │   │   └── main.py                   # FastAPI app setup
 │   ├── tests/                        # Pytest test suite
 │   ├── requirements.txt              # Python dependencies
+│   ├── Dockerfile                    # Python 3.12-slim build
+│   ├── .dockerignore                 # Docker ignore patterns
 │   └── .env.example                  # Environment template
 │
 ├── database/
-│   └── database_project/
-│       ├── bus_school.db             # SQLite database (source of truth)
-│       ├── setup_database.sql        # Database schema
-│       └── wbs-courses.csv           # Course data
+│   ├── database_project/
+│   │   ├── bus_school.db             # SQLite database (source of truth)
+│   │   ├── setup_database.sql        # Database schema
+│   │   └── wbs-courses.csv           # Course data
+│   └── vector_db/                    # ChromaDB persistence (Docker volume)
+│       └── chroma.sqlite3            # Vector database file
 │
-├── start.sh                          # Start both services
-├── stop.sh                           # Stop both services
+├── docker-compose.yml                # Multi-service orchestration
+├── .env.example                      # Environment variables template
+├── docker-deploy.sh                  # Docker deployment script (Linux/Mac)
+├── docker-deploy.bat                 # Docker deployment script (Windows)
+├── docker-test.sh                    # Docker configuration validator
+├── start.sh                          # Local development start script
+├── stop.sh                           # Local development stop script
 └── README.md                         # This file
 ```
 
@@ -165,10 +275,17 @@ AI-Adviser/
 | `student_context` | Access uploaded transcript data | "What's my GPA?", "What courses have I taken?" |
 | `assess_complexity` | Analyze query complexity | Internal routing decisions |
 
+### Session Management & Context Isolation
+- **Session-based isolation** - Each user session has completely isolated context
+- **Redis conversation memory** - Chat history persisted in Redis with configurable TTL
+- **TTL expiration** - Sessions auto-expire after 24 hours (configurable)
+- **LRU eviction** - Oldest sessions evicted when max capacity reached
+- **Tool context propagation** - Agent tools access session context via contextvars
+
 ### PDF Transcript Extraction
 - **Gemini Vision API** - OCR + LLM extraction
 - **Structured output** - Student name, ID, GPA, courses, grades
-- **Context caching** - 60-minute TTL for personalized responses
+- **Session-scoped caching** - Transcript data isolated per session with TTL
 
 ## API Endpoints
 
@@ -223,16 +340,46 @@ curl http://localhost:8000/api/health
 
 ## Configuration
 
-### Backend Environment (.env)
+### Environment Variables
+
+Create a `.env` file in the project root (copy from `.env.example`):
 
 ```bash
-# Required
-GOOGLE_API_KEY=your_google_gemini_api_key
+# Google API Configuration
+GOOGLE_API_KEY=your_google_api_key_here
 
-# Optional
-FRONTEND_URL=http://localhost:5173
-LOG_LEVEL=INFO
-REDIS_URL=redis://localhost:6379  # For conversation memory
+# LLM Provider (google or llama)
+LLM_PROVIDER=google
+
+# Gemini Model
+GEMINI_MODEL=gemini-2.5-flash
+
+# Redis Configuration
+REDIS_HOST=redis              # Use 'redis' for Docker, 'localhost' for local
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_SESSION_TTL=86400       # Session TTL in seconds (24 hours)
+REDIS_MAX_MESSAGES=100        # Max messages per session (LRU eviction)
+
+# Context Manager Configuration
+CONTEXT_TTL_SECONDS=86400     # Student context TTL (24 hours)
+MAX_CONTEXT_SESSIONS=1000     # Max concurrent sessions (LRU eviction)
+
+# CORS Configuration
+ALLOW_ALL_ORIGINS=false
+ALLOWED_ORIGINS=http://localhost,http://localhost:80
+
+# Streaming Configuration
+STREAMING_DISABLED=false
+
+# LangChain Debug Mode
+LANGCHAIN_DEBUG=false
+
+# Embedding Provider (google or local)
+EMBEDDING_PROVIDER=google
+
+# Frontend Configuration
+VITE_BACKEND_URL=http://localhost:8000
 ```
 
 ### Database Schema
@@ -267,6 +414,34 @@ CREATE TABLE specialty_courses (
     specialty_id INTEGER REFERENCES specialties(id),
     course_id INTEGER REFERENCES courses(id)
 );
+```
+
+### Vector Database (ChromaDB)
+
+The vector database provides semantic search capabilities and uses persistent storage.
+
+**Initialization Behavior:**
+- Uses `PersistentClient` - data is NOT regenerated on every startup
+- Indexes only rebuild if collections are empty OR embedding dimensions change
+- Location: `/app/database/vector_db` (Docker) or `database/vector_db` (local)
+
+**Current Index:**
+| Collection | Items | Description |
+|------------|-------|-------------|
+| courses | 89 | Course descriptions with embeddings |
+| programs | 3 | MSIT, MSBA, MSM program details |
+| specialties | 7 | Specialty focus areas |
+
+**Embedding Providers:**
+- `google` (default): 768 dimensions, requires GOOGLE_API_KEY
+- `local`: 384 dimensions, uses sentence-transformers (no API required)
+
+**Manual Rebuild:**
+```python
+# Rebuild all indexes (e.g., after course data updates)
+from app.services.vector_search_service import VectorSearchService, EntityType
+vector_service = VectorSearchService()
+vector_service.rebuild_index(EntityType.ALL)
 ```
 
 ## Testing
@@ -320,14 +495,19 @@ Invalid Format: Missing 'Action:' after 'Thought:
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | React 18 + TypeScript + Vite |
+| Frontend | React 19 + TypeScript + Vite |
 | Styling | TailwindCSS |
+| Web Server | Nginx (production) |
 | Backend | FastAPI + Python 3.12 |
-| LLM | Google Gemini 2.5 Flash |
+| LLM | Google Gemini 2.5 Flash/Pro |
 | Agent Framework | LangChain |
 | Database | SQLite |
+| Vector Database | ChromaDB (semantic search) |
+| Embeddings | Google Embeddings API or Sentence Transformers |
+| Cache/Session | Redis 7 |
 | Streaming | Server-Sent Events (SSE) |
 | PDF Extraction | Gemini Vision API |
+| Deployment | Docker + Docker Compose |
 
 ## License
 

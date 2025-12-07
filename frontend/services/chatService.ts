@@ -5,7 +5,11 @@ type ChatRequest = {
   topic_id?: string;  // Selected advising topic: 'general' or 'course'
 };
 
-const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
+// Use empty string for Docker (nginx proxy), or localhost for local dev
+// VITE_BACKEND_URL="" means use relative paths (nginx will proxy /api to backend)
+const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL !== undefined 
+  ? import.meta.env.VITE_BACKEND_URL 
+  : 'http://localhost:8000').replace(/\/$/, '');
 
 // Stream chat responses from `/api/chat` (text/event-stream). The backend returns SSE-style
 // chunks prefixed with `data:`. We use fetch+ReadableStream to consume and parse them.
