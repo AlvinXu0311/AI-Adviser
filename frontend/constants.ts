@@ -11,10 +11,9 @@ export const AGENT_STATUS_MESSAGES: Record<AgentStatus, string> = {
 };
 
 export const SAMPLE_QUESTIONS = [
-  "What are the prerequisites for the MBA program?",
-  "Who teaches the Data Mining for Business course?",
-  "Tell me about MSIT specializations",
-  "Check my degree progress (Upload Transcript)"
+  "What are the MSIT program requirements?",
+  "Tell me about MBA specializations",
+  "Who teaches CS 534?"
 ];
 
 // Mock database sources for visual effect

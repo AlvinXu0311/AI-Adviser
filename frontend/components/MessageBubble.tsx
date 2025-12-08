@@ -2,7 +2,7 @@ import { FC } from 'react';
 import { Message, Role } from '../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User, CheckCircle2, Book, ArrowRight } from 'lucide-react';
+import { Bot, User, CheckCircle2, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface MessageBubbleProps {
@@ -23,21 +23,21 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
       <div className={`flex max-w-[90%] md:max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'} items-start gap-3`}>
         
         {/* Avatar */}
-        <div className={`flex-shrink-0 w-14 h-14 rounded-full flex items-center justify-center shadow-sm mt-1 ${
+        <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-sm mt-1 ${
           isUser ? 'bg-gray-200' : 'bg-wpi-red'
         }`}>
-          {isUser ? <User size={28} className="text-gray-600" /> : <Bot size={28} className="text-white" />}
+          {isUser ? <User size={20} className="text-gray-600" /> : <Bot size={20} className="text-white" />}
         </div>
 
         {/* Bubble Content */}
         <div className="flex flex-col space-y-2">
           {/* Sender Name */}
-          <span className={`text-base font-semibold text-gray-500 ${isUser ? 'text-right' : 'text-left'} px-1`}>
+          <span className={`text-sm font-semibold text-gray-500 ${isUser ? 'text-right' : 'text-left'} px-1`}>
             {isUser ? 'You' : 'Digital Adviser'}
           </span>
 
           <div className={`
-            relative p-6 rounded-2xl shadow-sm text-xl leading-relaxed
+            relative p-5 rounded-2xl shadow-sm text-base leading-relaxed
             ${isUser 
               ? 'bg-wpi-red text-white rounded-tr-none' 
               : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
@@ -108,27 +108,9 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
              )}
           </div>
 
-          {/* Citations - Only for Assistant */}
-          {!isUser && message.citations && message.citations.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              className="flex flex-wrap gap-3 ml-1 mt-2"
-            >
-              {message.citations.map((cit) => (
-                <button 
-                  key={cit.id}
-                  className="flex items-center space-x-2 bg-white border border-gray-200 hover:border-wpi-red hover:shadow-md transition-all text-base text-gray-600 px-4 py-2 rounded-lg"
-                >
-                  <Book size={18} className="text-wpi-red" />
-                  <span className="font-medium truncate max-w-[200px]">{cit.source}</span>
-                </button>
-              ))}
-            </motion.div>
-          )}
+          {/* Citations hidden by default - only shown if user explicitly asks for sources */}
           
-          <span className={`text-sm text-gray-400 ${isUser ? 'text-right' : 'text-left'} px-1`}>
+          <span className={`text-xs text-gray-400 ${isUser ? 'text-right' : 'text-left'} px-1`}>
              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>

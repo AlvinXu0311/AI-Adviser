@@ -258,7 +258,7 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
               <button
                 key={i}
                 onClick={() => handleSendMessage(q)}
-                className="text-lg bg-white border border-gray-200 hover:border-wpi-red hover:text-wpi-red text-gray-600 px-5 py-3 rounded-full transition-colors shadow-sm"
+                className="text-sm bg-white border border-gray-200 hover:border-wpi-red hover:text-wpi-red text-gray-600 px-4 py-2 rounded-full transition-colors shadow-sm"
               >
                 {q}
               </button>

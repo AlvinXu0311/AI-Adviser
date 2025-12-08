@@ -53,7 +53,7 @@ const App: FC = () => {
           {
             id: 'welcome-1',
             role: 'assistant',
-            content: `Welcome, ${firstName}! \n\nI'm your WPI Business School Academic Adviser. I can help you with:\n\n• **Program Information** - MSIT, MSBA, MSM requirements\n• **Course Selection** - Prerequisites and recommendations\n• **Progress Tracking** - Upload your transcript for personalized advice\n\nHow can I assist you today?`,
+            content: `Welcome, ${firstName}! I'm your WPI Business School Digital Adviser. How can I help you today?`,
             timestamp: new Date(),
           }
         ],
