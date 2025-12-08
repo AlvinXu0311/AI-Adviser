@@ -70,6 +70,15 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
                 }
                 for c in (transcript_data.completed_courses or [])
             ],
+            "current_courses": [
+                {
+                    "course_code": c.course_code,
+                    "course_name": c.course_name,
+                    "credits": c.credits,
+                    "semester": c.semester
+                }
+                for c in (transcript_data.current_courses or [])
+            ],
             "transcript_text": transcript_data.raw_text
         }
         context_manager.set_student_context(request.session_id, transcript_dict)

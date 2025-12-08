@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatInterface } from './components/ChatInterface';
 import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
+import { EndChatModal } from './components/EndChatModal';
 import { ChatState, AgentStatus, User } from './types';
 import { getStoredSession, storeSession, clearSession, generateSessionId, logoutFromMicrosoft } from './services/authService';
 import { initializeMsal } from './config/msalConfig';
@@ -12,6 +13,7 @@ const App: FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [showEndChatModal, setShowEndChatModal] = useState(false);
   
   // Initialize MSAL and check for existing session on mount
   useEffect(() => {
@@ -51,7 +53,7 @@ const App: FC = () => {
           {
             id: 'welcome-1',
             role: 'assistant',
-            content: `Welcome, ${firstName}! 👋\n\nI'm your WPI Business School Academic Adviser. I can help you with:\n\n• **Program Information** - MSIT, MSBA, MSM requirements\n• **Course Selection** - Prerequisites and recommendations\n• **Progress Tracking** - Upload your transcript for personalized advice\n\nHow can I assist you today?`,
+            content: `Welcome, ${firstName}! \n\nI'm your WPI Business School Academic Adviser. I can help you with:\n\n• **Program Information** - MSIT, MSBA, MSM requirements\n• **Course Selection** - Prerequisites and recommendations\n• **Progress Tracking** - Upload your transcript for personalized advice\n\nHow can I assist you today?`,
             timestamp: new Date(),
           }
         ],
@@ -86,6 +88,25 @@ const App: FC = () => {
     sessionStorage.removeItem('chat_session_id');
     setChatState({
       messages: [],
+      isLoading: false,
+      agentStatus: AgentStatus.IDLE
+    });
+  };
+
+  // End chat session and clear messages
+  const handleEndChat = () => {
+    setShowEndChatModal(false);
+    // Reset chat to initial welcome message
+    const firstName = user?.name.split(' ')[0] || 'there';
+    setChatState({
+      messages: [
+        {
+          id: `welcome-${Date.now()}`,
+          role: 'assistant',
+          content: `Welcome back, ${firstName}! 👋\n\nYour previous session has ended. How can I help you today?`,
+          timestamp: new Date(),
+        }
+      ],
       isLoading: false,
       agentStatus: AgentStatus.IDLE
     });
@@ -132,7 +153,11 @@ const App: FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full w-full relative transition-all duration-300">
-        <Header toggleSidebar={toggleSidebar} user={user} />
+        <Header 
+          toggleSidebar={toggleSidebar} 
+          user={user}
+          onEndChat={() => setShowEndChatModal(true)}
+        />
         
         <main className="flex-1 overflow-hidden relative flex flex-col">
           <ChatInterface 
@@ -141,6 +166,15 @@ const App: FC = () => {
           />
         </main>
       </div>
+
+      {/* End Chat Modal */}
+      <EndChatModal
+        isOpen={showEndChatModal}
+        onClose={() => setShowEndChatModal(false)}
+        onConfirmEnd={handleEndChat}
+        messages={chatState.messages}
+        userName={user?.name || 'User'}
+      />
     </div>
   );
 };

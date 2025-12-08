@@ -53,10 +53,8 @@ services:
       # Database path (for Docker container)
       - BUS_SCHOOL_DB_PATH=/app/database/database_project/bus_school.db
     volumes:
-      # Mount database directory
+      # Mount database directory (includes PDF vector DB)
       - ./database:/app/database
-      # Mount vector DB for persistence
-      - vector_db:/app/vector_db
     depends_on:
       redis:
         condition: service_healthy
@@ -96,6 +94,4 @@ networks:
 
 volumes:
   redis_data:
-    driver: local
-  vector_db:
     driver: local

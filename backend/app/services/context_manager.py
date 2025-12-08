@@ -42,7 +42,8 @@ class StudentContext:
         self.email: Optional[str] = None
         self.degree_program: Optional[str] = None
         self.gpa: Optional[float] = None
-        self.courses: list[dict] = []
+        self.courses: list[dict] = []  # Completed courses
+        self.current_courses: list[dict] = []  # Currently enrolled courses
         self.transcript_text: Optional[str] = None
         self.raw_data: Optional[Dict[str, Any]] = None
         self.created_at: datetime = datetime.now()
@@ -64,6 +65,7 @@ class StudentContext:
         self.degree_program = transcript_data.get("degree_program")
         self.gpa = transcript_data.get("gpa")
         self.courses = transcript_data.get("courses", [])
+        self.current_courses = transcript_data.get("current_courses", [])
         self.transcript_text = transcript_data.get("transcript_text")
         self.raw_data = transcript_data
     
@@ -89,6 +91,7 @@ class StudentContext:
             "degree_program": self.degree_program,
             "gpa": self.gpa,
             "courses": self.courses,
+            "current_courses": self.current_courses,
             "transcript_text": self.transcript_text
         }
     

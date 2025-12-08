@@ -243,6 +243,7 @@ CRITICAL INSTRUCTIONS:
 - If information is not explicitly stated, set it to null
 - Be thorough: Extract EVERY course listed with ALL its details
 - Find and extract all grades, credits, and course codes accurately
+- DISTINGUISH between completed courses (with grades) and current courses (in progress, no final grade)
 
 Return the data in this JSON format ONLY (no markdown code blocks, just pure JSON):
 {{
@@ -258,17 +259,19 @@ Return the data in this JSON format ONLY (no markdown code blocks, just pure JSO
             "course_code": "Exact course code (e.g., MIS581, IT504, CS101)",
             "course_name": "Exact course name/title",
             "credits": 3.0,
-            "grade": "Grade earned (A, B, C, D, F, or with +/-, or null if not shown)"
+            "grade": "Grade earned (A, B, C, D, F, or with +/-, or null if not shown)",
+            "semester": "Semester if shown (e.g., Fall 2024, Spring 2025)"
         }},
-        ...more courses...
+        ...more completed courses with grades...
     ],
     "current_courses": [
         {{
             "course_code": "Exact course code",
             "course_name": "Exact course name",
-            "credits": 3.0
+            "credits": 3.0,
+            "semester": "Current semester if shown"
         }},
-        ...more courses...
+        ...courses currently being taken (in progress, no grade yet)...
     ]
 }}
 
@@ -278,14 +281,20 @@ EXTRACTION GUIDELINES:
    - Extract the numeric value only (3.71, 3.5, 2.75, etc.)
    - Must be between 0.0 and 4.0
 
-2. Course Extraction (Find EVERY course):
+2. COMPLETED vs CURRENT Courses (VERY IMPORTANT):
+   - COMPLETED courses: Have a final grade (A, B, C, D, F, etc.) - put in "completed_courses"
+   - CURRENT courses: In progress, no final grade, status like "IP", "In Progress", "Enrolled", or just no grade - put in "current_courses"
+   - Look for section headers like "Current Term", "In Progress", "Current Semester", "Enrolled Courses"
+   - Courses listed for the current/latest semester without grades are likely current courses
+   - If a course shows status like "IP", "In Progress", "Registered", or blank grade - it's a CURRENT course
+
+3. Course Extraction (Find EVERY course):
    - Look for course code patterns: All caps + numbers (MIS581, IT504, MBA502, CS101, etc.)
-   - For each course, find: code, name, credits, and grade (if shown)
-   - Include BOTH completed and current courses
+   - For each course, find: code, name, credits, grade (if any), and semester
    - Extract grades exactly as shown (A+, A, A-, B+, B, B-, C+, C, C-, D+, D, D-, F, or numeric)
    - Extract credits as numbers (3.0, 4.0, etc.)
 
-3. Student Info:
+4. Student Info:
    - Name: Full legal name as shown
    - ID: Student ID or A-ID number
    - Program: Exact program name (MS in Information Technology, MBA, etc.)

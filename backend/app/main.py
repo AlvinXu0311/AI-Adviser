@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.chat import router as chat_router
 from .api.transcript import router as transcript_router
 from .api.status import router as status_router
+from .api.summary import router as summary_router
+from .api.admin import router as admin_router
 from dotenv import load_dotenv
 import os
 import logging
@@ -100,6 +102,8 @@ else:
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(transcript_router, prefix="/api", tags=["transcript"])
 app.include_router(status_router, prefix="/api", tags=["status"])
+app.include_router(summary_router, prefix="/api", tags=["summary"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/", tags=["health"])

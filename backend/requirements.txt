@@ -27,3 +27,4 @@ rank-bm25==0.2.2
 redis==5.0.7
 psycopg[binary]==3.2.1
 langchain-community
+PyMuPDF>=1.24.0

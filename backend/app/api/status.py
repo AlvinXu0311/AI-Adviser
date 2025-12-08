@@ -6,7 +6,7 @@ from typing import Dict
 
 from fastapi import APIRouter
 
-from ..services.vector_search_service import get_vector_search_service
+from ..services.pdf_vector_service import get_pdf_vector_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,31 +28,16 @@ def _status_payload(
 
 
 def _check_vector_db() -> Dict[str, str]:
-    """Verify the ChromaDB vector search service is ready."""
+    """Verify the ChromaDB PDF vector search service is ready."""
     try:
-        vector_service = get_vector_search_service()
-
-        # Check if collections are initialized and have data
-        collections = getattr(vector_service, "collections", {})
-        if not collections:
-            return _status_payload(
-                "vector_db",
-                "Vector DB",
-                "offline",
-                "Collections not initialized"
-            )
-
-        # Count total indexed items across all collections
-        total_items = 0
-        collection_details = []
-
-        for entity_type, collection in collections.items():
-            count = collection.count()
-            total_items += count
-            collection_details.append(f"{entity_type.value}: {count}")
-
-        if total_items > 0:
-            details = f"Indexed {total_items} items ({', '.join(collection_details)})"
+        pdf_service = get_pdf_vector_service()
+        stats = pdf_service.get_stats()
+        
+        total_chunks = stats.get("total_chunks", 0)
+        embedding_type = stats.get("embedding_type", "unknown")
+        
+        if total_chunks > 0:
+            details = f"Indexed {total_chunks} chunks from PDFs ({embedding_type} embeddings)"
             return _status_payload(
                 "vector_db",
                 "Vector DB",
@@ -64,7 +49,7 @@ def _check_vector_db() -> Dict[str, str]:
             "vector_db",
             "Vector DB",
             "offline",
-            "No documents indexed"
+            "No PDF documents indexed"
         )
     except Exception as exc:
         logger.exception("Vector DB status check failed")

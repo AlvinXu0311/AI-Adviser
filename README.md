@@ -129,7 +129,7 @@ npm run dev -- --host 0.0.0.0
 │                   Frontend (React + Nginx)                       │
 │  - Chat Interface with streaming responses                       │
 │  - PDF transcript upload with Gemini Vision extraction           │
-│  - Real-time system status indicators                            │
+│  - Real-time agent process visualization (tool calls, reasoning) │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -138,19 +138,30 @@ npm run dev -- --host 0.0.0.0
 │                                                                  │
 │  ┌─────────────────┐    ┌──────────────────────────────────┐   │
 │  │  Intent Agent   │───▶│       Adviser Agent (ReAct)       │   │
-│  │  (Free-form LLM │    │  - business_school_database tool  │   │
-│  │   Classification)    │  - context_lookup tool            │   │
-│  └─────────────────┘    │  - semantic_search tool           │   │
+│  │  (Free-form LLM │    │  Multi-step reasoning with tools  │   │
+│  │   Classification)    │  - smart_course_search            │   │
+│  └─────────────────┘    │  - program_search                 │   │
+│                         │  - semantic_search                │   │
+│                         │  - degree_progress                │   │
+│                         │  - student_context                │   │
 │                         └──────────────────────────────────┘   │
 │                                      │                          │
-│                                      ▼                          │
+│                         ┌────────────┴────────────┐            │
+│                         ▼                         ▼            │
 │         ┌──────────────────┐    ┌─────────────────────┐        │
 │         │ SQLite Database  │    │ ChromaDB Vector DB  │        │
-│         │ (bus_school.db)  │    │  (semantic search)  │        │
-│         │  - Programs (3)  │    │  - Courses (103)    │        │
-│         │  - Specialties(7)│    │  - Programs (3)     │        │
-│         │  - Courses (103) │    │  - Specialties (7)  │        │
+│         │ (bus_school.db)  │    │  (PDF Catalog RAG)  │        │
+│         │  - Programs (3)  │    │  - 272 course chunks│        │
+│         │  - Specialties   │    │  - Course-aware     │        │
+│         │  - Courses (103) │    │    chunking         │        │
 │         └──────────────────┘    └─────────────────────┘        │
+│                         │                                       │
+│                         ▼                                       │
+│              ┌──────────────────────┐                          │
+│              │   Unified Search     │                          │
+│              │  DB-first → RAG      │                          │
+│              │  with retry logic    │                          │
+│              └──────────────────────┘                          │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -159,6 +170,27 @@ npm run dev -- --host 0.0.0.0
                     │ (Session Memory) │
                     └──────────────────┘
 ```
+
+### Unified Search Architecture
+
+All search tools share a common search strategy:
+
+```
+Query → DB Search (SQLite) → Found? → Return
+                ↓ No
+        RAG Search (ChromaDB) → Found? → Return
+                ↓ No
+        Retry with query variations (2-3 attempts)
+                ↓ Still No
+        Return "Not found" message
+```
+
+**Key Features:**
+- **DB-First**: Structured SQL queries for accurate results
+- **RAG Fallback**: Semantic search on PDF catalogs when DB fails
+- **Smart Retry**: Query variations (e.g., "MA 571" → "MA" + "571" → "Financial Mathematics")
+- **Course Code Validation**: Prevents false positives (e.g., "MA 571" won't return "MIS 571")
+- **Score Boosting**: Exact course code matches get higher relevance scores
 
 ### Docker Deployment Architecture
 ```
@@ -206,9 +238,9 @@ AI-Adviser/
 ├── backend/                           # FastAPI application
 │   ├── app/
 │   │   ├── agents/
-│   │   │   ├── adviser_agent.py      # ReAct agent with tool use
+│   │   │   ├── adviser_agent.py      # ReAct agent with multi-step reasoning
 │   │   │   ├── intent_agent.py       # Intent classification
-│   │   │   ├── tools.py              # Agent tools (db, search, context)
+│   │   │   ├── tools.py              # Unified search tools (smart_course_search, program_search, etc.)
 │   │   │   └── streaming_callback.py # SSE streaming handler
 │   │   ├── api/
 │   │   │   ├── chat.py               # /api/chat endpoint (streaming)
@@ -216,7 +248,7 @@ AI-Adviser/
 │   │   │   └── status.py             # /api/status (system health)
 │   │   ├── services/
 │   │   │   ├── program_db_service.py # SQLite database queries
-│   │   │   ├── vector_search_service.py # ChromaDB semantic search
+│   │   │   ├── pdf_vector_service.py  # ChromaDB with course-aware chunking
 │   │   │   ├── context_manager.py    # Session-isolated context with TTL/LRU
 │   │   │   ├── pdf_extraction_service.py # Gemini Vision PDF extraction
 │   │   │   └── conversation_memory.py # Redis chat history with TTL
@@ -252,9 +284,10 @@ AI-Adviser/
 
 ### Chat Interface
 - **Streaming responses** - Real-time token-by-token output
-- **Agent process visualization** - See tool calls and reasoning steps
+- **Agent process visualization** - See tool calls and reasoning steps in real-time
+- **Multi-step reasoning display** - Watch the agent think through complex queries
 - **Voice input** - Speech-to-text for questions
-- **File upload** - PDF transcript extraction
+- **File upload** - PDF transcript extraction with Gemini Vision
 
 ### Intent Classification (Layer 1)
 - **Free-form LLM analysis** - No hardcoded intent types
@@ -264,16 +297,44 @@ AI-Adviser/
 
 ### Adviser Agent (Layer 2)
 - **ReAct pattern** - Thought → Action → Observation loop
-- **Database-First** - SQLite as single source of truth
+- **Multi-step reasoning** - Complex questions trigger 2-9 tool calls
+- **Unified Search** - DB-first with RAG fallback and retry logic
 - **Tool use** - Automatic tool invocation based on query type
+- **Agent process streaming** - Real-time visualization of tool calls
 
 ### Agent Tools
 
 | Tool | Purpose | Example Queries |
 |------|---------|-----------------|
-| `business_school_database` | Query programs, specialties, courses | "What are MSIT requirements?" |
+| `smart_course_search` | Search for course details (instructor, credits, prerequisites) | "Who teaches MIS 587?", "What is CS 534 about?" |
+| `program_search` | Search for program requirements and specializations | "What are MSIT requirements?", "MBA specializations" |
+| `semantic_search` | General semantic search on PDF catalogs | "Machine learning courses", "AI curriculum" |
+| `degree_progress` | Compare student progress against program requirements | "What courses do I still need for MBA?" |
 | `student_context` | Access uploaded transcript data | "What's my GPA?", "What courses have I taken?" |
-| `assess_complexity` | Analyze query complexity | Internal routing decisions |
+| `business_school_database` | Direct database queries | "List all programs" |
+| `assess_complexity` | Analyze query complexity for routing | Internal routing decisions |
+
+### Multi-Step ReAct Reasoning
+
+For complex questions, the agent uses **multiple tools** in sequence:
+
+**Example: "Create a study plan for MBA with Business Analytics focus"**
+```
+Step 1: program_search("MBA Business Analytics") → Get program requirements
+Step 2: smart_course_search("MIS 502") → Get course details
+Step 3: smart_course_search("MIS 584") → Get more course details
+Step 4: smart_course_search("OIE 552") → Get analytics course info
+...
+Final Answer: Comprehensive study plan with all course descriptions
+```
+
+**Example: "Compare MSIT and MSBA for data analytics"**
+```
+Step 1: program_search("MSIT requirements") → Get MSIT info
+Step 2: program_search("MSBA requirements") → Get MSBA info
+Step 3: smart_course_search("data analytics courses") → Find relevant courses
+Final Answer: Detailed comparison with recommendations
+```
 
 ### Session Management & Context Isolation
 - **Session-based isolation** - Each user session has completely isolated context
@@ -418,7 +479,18 @@ CREATE TABLE specialty_courses (
 
 ### Vector Database (ChromaDB)
 
-The vector database provides semantic search capabilities and uses persistent storage.
+The vector database provides semantic search capabilities with **course-aware chunking**.
+
+**Course-Aware Chunking:**
+- Automatically detects course boundaries in PDF catalogs
+- Each course becomes its own chunk with metadata (course_code, course_title)
+- Supports cross-listed courses (e.g., "DS/ECE 577" detected as both)
+- Result: 272 course chunks (vs. 81 with fixed-size chunking)
+
+**Score Boosting:**
+- Exact course code match: +0.5 relevance boost
+- Course number match: +0.3 relevance boost
+- Example: Query "ECE 577" → "ECE 577: Machine Learning in Cybersecurity" scores 1.00
 
 **Initialization Behavior:**
 - Uses `PersistentClient` - data is NOT regenerated on every startup
@@ -428,20 +500,27 @@ The vector database provides semantic search capabilities and uses persistent st
 **Current Index:**
 | Collection | Items | Description |
 |------------|-------|-------------|
+| pdf_chunks | 272 | Course-aware chunks from PDF catalogs |
 | courses | 89 | Course descriptions with embeddings |
 | programs | 3 | MSIT, MSBA, MSM program details |
 | specialties | 7 | Specialty focus areas |
+
+**PDF Sources Indexed:**
+- Business School Courses (79 courses)
+- Mathematical Science Courses (57 courses)
+- Computer Science Courses (117 courses)
 
 **Embedding Providers:**
 - `google` (default): 768 dimensions, requires GOOGLE_API_KEY
 - `local`: 384 dimensions, uses sentence-transformers (no API required)
 
 **Manual Rebuild:**
-```python
-# Rebuild all indexes (e.g., after course data updates)
-from app.services.vector_search_service import VectorSearchService, EntityType
-vector_service = VectorSearchService()
-vector_service.rebuild_index(EntityType.ALL)
+```bash
+# Rebuild PDF vector index via API
+curl -X POST http://localhost:8000/api/admin/rebuild-pdf-index
+
+# Or use the admin endpoint in browser
+# GET http://localhost:8000/api/admin/pdf-index-stats
 ```
 
 ## Testing
