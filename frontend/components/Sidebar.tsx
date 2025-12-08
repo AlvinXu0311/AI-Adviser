@@ -2,7 +2,7 @@ import { FC, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   X,
-  Sparkles,
+  ExternalLink,
   LogOut,
   User as UserIcon
 } from 'lucide-react';
@@ -90,9 +90,9 @@ export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar, user, onLogou
     >
       <div className="p-6 flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <div className="w-14 h-14 rounded-lg flex items-center justify-center shadow-lg overflow-hidden">
+          <a href="https://www.wpi.edu" target="_blank" rel="noopener noreferrer" className="w-14 h-14 rounded-lg flex items-center justify-center shadow-lg overflow-hidden hover:ring-2 hover:ring-wpi-red transition-all">
             <img src="/assets/WPI_ICON.jpg" alt="WPI Logo" className="w-full h-full object-cover" />
-          </div>
+          </a>
           <div className="overflow-hidden">
             <h1 className="font-bold text-2xl leading-tight">WPI Business</h1>
             <span className="text-base text-gray-400 font-medium tracking-wider">DIGITAL ADVISER</span>
@@ -104,10 +104,36 @@ export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar, user, onLogou
       </div>
 
       <div className="flex-1 overflow-y-auto py-6 px-6 space-y-6">
-        <div className="bg-white/5 rounded-2xl border border-white/10 p-6 shadow-inner">
-          <div className="flex items-center space-x-4 mb-3">
-            <Sparkles className="text-wpi-red w-7 h-7" />
-            <p className="text-lg font-semibold tracking-wide text-gray-200">Adviser Portal</p>
+        <div className="bg-white/5 rounded-2xl border border-white/10 p-5 shadow-inner">
+          <p className="text-base uppercase tracking-[0.3em] text-gray-500 mb-4">WPI Resources</p>
+          <div className="space-y-3">
+            <a 
+              href="https://www.wpi.edu/offices/academic-advising" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-between text-gray-300 hover:text-wpi-red transition-colors group"
+            >
+              <span className="text-sm">Academic Advising</span>
+              <ExternalLink className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+            </a>
+            <a 
+              href="https://www.wpi.edu/academics/business" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-between text-gray-300 hover:text-wpi-red transition-colors group"
+            >
+              <span className="text-sm">Business School</span>
+              <ExternalLink className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+            </a>
+            <a 
+              href="https://www.wpi.edu/student-experience/resources" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-between text-gray-300 hover:text-wpi-red transition-colors group"
+            >
+              <span className="text-sm">Student Resources</span>
+              <ExternalLink className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+            </a>
           </div>
         </div>
 

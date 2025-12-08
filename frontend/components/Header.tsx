@@ -1,5 +1,5 @@
 import { FC } from 'react';
-import { Menu, Bell, LogOut, XCircle } from 'lucide-react';
+import { Menu, LogOut, XCircle } from 'lucide-react';
 import { User } from '../types';
 
 interface HeaderProps {
@@ -46,10 +46,6 @@ export const Header: FC<HeaderProps> = ({ toggleSidebar, user, onLogout, onEndCh
           </button>
         )}
         
-        <button className="p-3 text-gray-500 hover:bg-gray-100 rounded-full relative transition-colors">
-          <Bell size={28} />
-          <span className="absolute top-1 right-1 w-3 h-3 bg-wpi-red rounded-full border-2 border-white"></span>
-        </button>
         <div className="h-10 w-px bg-gray-200 mx-1"></div>
         <div className="flex items-center space-x-3 p-2 rounded-full border border-gray-200">
           <div className="w-12 h-12 bg-gradient-to-br from-wpi-red to-red-800 rounded-full flex items-center justify-center text-white font-bold text-lg">

@@ -1,6 +1,126 @@
 # WPI Business School Digital Adviser
 
-Interactive chatbot platform for academic advising with PDF transcript upload, LangChain agents, and Database-First architecture.
+Interactive chatbot platform for academic advising with PDF transcript upload, **LangChain ReAct agents**, and **Database-First architecture**.
+
+## Key Features
+
+| Feature | Technology | Description |
+|---------|------------|-------------|
+| **ReAct Agent Framework** | LangChain + Gemini 2.5 Pro | Multi-step reasoning with Thought → Action → Observation loops |
+| **Database-First Architecture** | SQLite + ChromaDB | Authoritative SQL queries with semantic search fallback |
+| **Unified Search Layer** | Custom Tool Chain | DB-first → RAG fallback → Smart retry with query variations |
+| **Real-time Streaming** | SSE + FastAPI | Token-by-token response with live tool call visualization |
+| **PDF Transcript Extraction** | Gemini Vision API | OCR + structured data extraction from academic transcripts |
+| **Session Isolation** | Redis + Context Managers | Per-session memory with TTL expiration and LRU eviction |
+| **Conversational AI** | Prompt Engineering | Asks clarifying questions before making assumptions |
+
+## Architecture Highlights
+
+### ReAct (Reasoning + Acting) Framework
+
+The core of the Digital Adviser is a **LangChain ReAct agent** that performs multi-step reasoning:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ReAct Agent Loop                              │
+│                                                                  │
+│   User Query                                                     │
+│       ↓                                                         │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │ Thought: "I need to find MSIT specialization info..."   │   │
+│   │ Action: program_search                                   │   │
+│   │ Action Input: "MSIT specializations"                     │   │
+│   └─────────────────────────────────────────────────────────┘   │
+│       ↓                                                         │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │ Observation: "MSIT offers AI, Systems Design, ..."      │   │
+│   └─────────────────────────────────────────────────────────┘   │
+│       ↓                                                         │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │ Thought: "Now I need course details for each..."        │   │
+│   │ Action: smart_course_search                              │   │
+│   │ Action Input: "MIS 587 Predictive Analytics"             │   │
+│   └─────────────────────────────────────────────────────────┘   │
+│       ↓                                                         │
+│   ... (2-9 tool calls for complex questions) ...                │
+│       ↓                                                         │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │ Thought: "I have enough information to answer."          │   │
+│   │ Final Answer: [Complete, well-organized response]        │   │
+│   └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Agent Tools
+
+| Tool | Purpose | Architecture |
+|------|---------|--------------|
+| `smart_course_search` | Course details (instructor, credits, prerequisites) | Unified Search: DB → RAG → Retry |
+| `program_search` | Program requirements and specializations | Unified Search: DB → RAG → Retry |
+| `semantic_search` | General semantic search on PDF catalogs | ChromaDB with course-aware chunking |
+| `degree_progress` | Student progress vs. program requirements | Requires uploaded transcript |
+| `student_context` | Access student's uploaded transcript data | Session-scoped with Redis |
+| `business_school_database` | Direct SQL queries | SQLite (authoritative source) |
+
+### Unified Search Strategy
+
+```
+Query → DB Search (SQLite) → Found? → Return
+                ↓ No
+        RAG Search (ChromaDB) → Found? → Return  
+                ↓ No
+        Retry with query variations (2-3 attempts)
+                ↓ Still No
+        Return "Not found" message
+```
+
+**Key Innovations:**
+- **Course Code Validation**: Prevents false positives (e.g., "MA 571" won't return "MIS 571")
+- **Score Boosting**: Exact course code matches get +0.5 relevance boost
+- **Smart Retry**: Query variations (e.g., "MA 571" → "Financial Mathematics")
+
+## Tech Stack
+
+### Frontend
+| Technology | Purpose |
+|------------|---------|
+| **React 18** | Component-based UI with hooks |
+| **TypeScript** | Type-safe development |
+| **Vite** | Fast build tooling and HMR |
+| **Tailwind CSS** | Utility-first styling |
+| **Framer Motion** | Smooth animations |
+| **Lucide React** | Modern icon library |
+| **React Markdown + remark-gfm** | Rich markdown rendering with table support |
+| **Nginx** | Production static file serving and reverse proxy |
+
+### Backend
+| Technology | Purpose |
+|------------|---------|
+| **FastAPI** | High-performance async API framework |
+| **LangChain** | ReAct agent framework with tool orchestration |
+| **Google Gemini 2.5 Pro** | LLM for reasoning and generation |
+| **Gemini Vision API** | PDF transcript OCR and extraction |
+| **ChromaDB** | Vector database for semantic search |
+| **SQLite** | Structured program/course database |
+| **Redis** | Session memory and conversation history |
+| **Pydantic** | Data validation and serialization |
+| **SSE (Server-Sent Events)** | Real-time streaming responses |
+
+### DevOps
+| Technology | Purpose |
+|------------|---------|
+| **Docker** | Containerized deployment |
+| **Docker Compose** | Multi-service orchestration |
+| **Cloudflare Tunnel** | Secure public access (optional) |
+
+### AI/ML Architecture
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **ReAct Agent** | LangChain + Gemini | Multi-step reasoning with tool use |
+| **Intent Classification** | Free-form LLM | No hardcoded categories, natural language analysis |
+| **Unified Search** | SQLite + ChromaDB | DB-first with semantic fallback |
+| **Course-Aware Chunking** | Custom Regex | 272 course chunks with metadata |
+| **Conversation Memory** | Redis + TTL | 24-hour session persistence |
 
 ## Quick Start
 
@@ -446,7 +566,7 @@ VITE_BACKEND_URL=http://localhost:8000
 ### Database Schema
 
 ```sql
--- Programs: MSIT, MSBA, MSM
+-- Programs: MSIT, MSBA, MBA, MSM
 CREATE TABLE programs (
     id INTEGER PRIMARY KEY,
     program_code TEXT,
@@ -502,7 +622,7 @@ The vector database provides semantic search capabilities with **course-aware ch
 |------------|-------|-------------|
 | pdf_chunks | 272 | Course-aware chunks from PDF catalogs |
 | courses | 89 | Course descriptions with embeddings |
-| programs | 3 | MSIT, MSBA, MSM program details |
+| programs | 4 | MSIT, MSBA, MBA, MSM program details |
 | specialties | 7 | Specialty focus areas |
 
 **PDF Sources Indexed:**

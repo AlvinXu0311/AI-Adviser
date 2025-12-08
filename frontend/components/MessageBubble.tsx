@@ -1,6 +1,7 @@
 import { FC } from 'react';
 import { Message, Role } from '../types';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Bot, User, CheckCircle2, Book, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -46,12 +47,42 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
              <div className={`markdown-body ${isUser ? 'text-white' : 'text-gray-800'}`}>
                 {/* Use a simplified renderer or standard styling */}
                 <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]}
                   components={{
-                    p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                    p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
                     ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2" {...props} />,
                     ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-2" {...props} />,
                     a: ({node, ...props}) => <a className="underline font-semibold hover:opacity-80" {...props} />,
-                    strong: ({node, ...props}) => <strong className="font-bold" {...props} />
+                    strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
+                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold mt-4 mb-2" {...props} />,
+                    h2: ({node, ...props}) => <h2 className="text-xl font-bold mt-4 mb-2" {...props} />,
+                    h3: ({node, ...props}) => <h3 className="text-lg font-bold mt-3 mb-2" {...props} />,
+                    h4: ({node, ...props}) => <h4 className="text-base font-bold mt-3 mb-1" {...props} />,
+                    table: ({node, ...props}) => (
+                      <div className="overflow-x-auto my-4">
+                        <table className="min-w-full border-collapse border border-gray-300 text-base" {...props} />
+                      </div>
+                    ),
+                    thead: ({node, ...props}) => <thead className="bg-gray-100" {...props} />,
+                    tbody: ({node, ...props}) => <tbody {...props} />,
+                    tr: ({node, ...props}) => <tr className="border-b border-gray-200" {...props} />,
+                    th: ({node, ...props}) => (
+                      <th className="px-4 py-3 text-left font-semibold text-gray-700 border border-gray-300 bg-gray-50" {...props} />
+                    ),
+                    td: ({node, ...props}) => (
+                      <td className="px-4 py-3 text-gray-600 border border-gray-300" {...props} />
+                    ),
+                    code: ({node, className, children, ...props}) => {
+                      const isInline = !className;
+                      return isInline ? (
+                        <code className="bg-gray-100 text-wpi-red px-1.5 py-0.5 rounded text-sm font-mono" {...props}>{children}</code>
+                      ) : (
+                        <code className={`block bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm font-mono ${className}`} {...props}>{children}</code>
+                      );
+                    },
+                    blockquote: ({node, ...props}) => (
+                      <blockquote className="border-l-4 border-wpi-red pl-4 my-3 italic text-gray-600" {...props} />
+                    )
                   }}
                 >
                   {message.content}
