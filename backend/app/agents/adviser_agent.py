@@ -13,6 +13,53 @@ from ..services.context_manager import get_context_manager
 logger = logging.getLogger(__name__)
 
 
+def get_available_programs() -> List[str]:
+    """
+    Dynamically fetch available programs from the database.
+    Returns a list of program names/codes that degree_progress supports.
+    """
+    try:
+        from ..services.program_db_service import get_program_db_service
+        db_service = get_program_db_service()
+        programs = db_service.get_all_programs()
+        
+        if not programs:
+            logger.warning("No programs found in database, using fallback list")
+            return ["MSIT", "MSBA", "MBA", "MBA in Analytics", "FinTech", "MSOS"]
+        
+        # Extract unique program codes/names
+        program_list = []
+        for p in programs:
+            code = p.get('program_code', '')
+            name = p.get('program_name', '')
+            # Create a readable format: "MSIT (Master's in Information Technology)"
+            if code and name and code != name:
+                program_list.append(f"{code} ({name})")
+            elif name:
+                program_list.append(name)
+            elif code:
+                program_list.append(code)
+        
+        logger.info(f"Loaded {len(program_list)} programs from database: {program_list}")
+        return program_list
+    except Exception as e:
+        logger.error(f"Failed to fetch programs from database: {e}")
+        return ["MSIT", "MSBA", "MBA", "MBA in Analytics", "FinTech", "MSOS"]
+
+
+def get_program_list_for_prompt() -> str:
+    """
+    Get formatted program list for inclusion in agent prompt.
+    Fetches dynamically from database.
+    """
+    programs = get_available_programs()
+    if not programs:
+        return "No programs available in database."
+    
+    # Format as bullet list
+    return "\n".join(f"- {p}" for p in programs)
+
+
 class AdviserAgent:
     """
     Chat Agent using LangChain's ReAct pattern for conversational advising.
@@ -44,10 +91,15 @@ class AdviserAgent:
         # self.rag_agent = get_rag_agent()
 
         self.tools = get_all_tools()
+        
+        # Dynamically fetch available programs from database
+        self.available_programs = get_available_programs()
+        self.program_list_str = get_program_list_for_prompt()
+        logger.info(f"Loaded available programs: {self.available_programs}")
 
         # Improved system prompt for agentic reasoning with DB-First architecture
-        self.system_prompt = """You are an expert Academic Adviser for WPI Business School.
-    Your expertise: Programs (MSIT, MSBA, MSM), course requirements, specializations, student academic planning, and academic catalogs.
+        self.system_prompt = f"""You are an expert Academic Adviser for WPI Business School.
+    Your expertise: Programs ({', '.join(self.available_programs)}), course requirements, specializations, student academic planning, and academic catalogs.
 
 CORE RESPONSIBILITIES:
 1. Answer student questions about degree programs, requirements, and courses
@@ -100,7 +152,10 @@ CRITICAL RULES:
 
     def _create_agent(self) -> AgentExecutor:
         """Create the ReAct agent with optimized prompt for agentic reasoning"""
-        prompt_template = """You are an expert Academic Adviser for WPI Business School.
+        
+        # Build prompt template with dynamic program list
+        # Use double braces for LangChain placeholders, single for our replacement
+        prompt_template_raw = """You are an expert Academic Adviser for WPI Business School.
 
 SYSTEM CONTEXT:
 You help students with program information, course planning, and academic guidance.
@@ -177,12 +232,46 @@ GOOD CONVERSATIONAL FLOW:
 3. User: "I'm in MSIT"
 4. Agent: NOW search → program_search("MSIT AI specialization") + smart_course_search("machine learning")
 
-AVAILABLE PROGRAMS AT WPI BUSINESS SCHOOL:
-- MSIT (Master of Science in Information Technology)
-- MSBA (Master of Science in Business Analytics)
-- MBA (Master of Business Administration)
-- MSM (Master of Science in Management)
-Only recommend courses and programs that exist in our database. Do NOT invent programs like "FinTech" or "Finance" that we don't offer.
+================================================================================
+DEGREE PROGRESS VERIFICATION (CRITICAL!):
+================================================================================
+
+When user asks about DEGREE PROGRESS, GRADUATION STATUS, or REMAINING COURSES:
+- "Check my progress", "What do I still need?", "Am I close to graduating?"
+- "How many credits left?", "What courses remain?"
+
+YOU MUST VERIFY THESE CONDITIONS BEFORE USING degree_progress TOOL:
+
+1. TRANSCRIPT CHECK: Has user uploaded a transcript?
+   - If NO → "To check your degree progress, please upload your transcript first using the paperclip icon."
+
+2. PROGRAM CONFIRMATION: Which program is the student in?
+   - SUPPORTED PROGRAMS: See "AVAILABLE PROGRAMS" section below (fetched from database)
+   - If program is UNCLEAR → "Which program are you enrolled in?" (then list available programs)
+   - If program is NOT in our database → Tell user the program is not supported and list available ones
+
+3. DOUBLE-CHECK before running degree_progress:
+   - Confirm: "Just to confirm - you're in the [PROGRAM] program, correct? I'll check your remaining requirements."
+
+EXAMPLE FLOW FOR DEGREE PROGRESS:
+1. User: "Check my degree progress"
+2. Agent: First use student_context to check if transcript exists and get program
+3. If no transcript → Ask to upload
+4. If transcript exists but program unclear → "I see you've uploaded a transcript. Which program are you pursuing?" (list available programs)
+5. User: "MSIT"  
+6. Agent: "Great! Checking your MSIT progress now..." → degree_progress("MSIT")
+
+================================================================================
+AVAILABLE PROGRAMS AT WPI BUSINESS SCHOOL (FETCHED FROM DATABASE):
+================================================================================
+
+ONLY THESE PROGRAMS ARE IN OUR DATABASE (degree_progress ONLY works for these):
+<<AVAILABLE_PROGRAMS>>
+
+IMPORTANT: Do NOT accept or process degree progress for programs outside this list.
+If user mentions a program not listed above, tell them: 
+"I don't have [program name] in my database. Let me check what programs are available..." 
+Then use the programs listed above.
 
 ================================================================================
 WHEN TO USE MULTIPLE TOOLS:
@@ -260,6 +349,12 @@ Begin!
 Question: {input}
 Thought: Let me analyze this question. I'll determine what information I need and which tool(s) to use.
 {agent_scratchpad}"""
+
+        # Replace the dynamic placeholder with actual program list from database
+        prompt_template = prompt_template_raw.replace(
+            "<<AVAILABLE_PROGRAMS>>", 
+            self.program_list_str
+        )
 
         from langchain.prompts import PromptTemplate as LP
         prompt = LP(
@@ -346,10 +441,10 @@ Thought: Let me analyze this question. I'll determine what information I need an
             conversation_context = ""
             if conversation_history and len(conversation_history) > 0:
                 context_parts = ["### CONVERSATION HISTORY (use this to understand context):"]
-                # Include up to last 10 messages for context
-                for msg in conversation_history[-10:]:
+                # Include up to last 20 messages for better context retention
+                for msg in conversation_history[-20:]:
                     role = msg.get('role', 'unknown').upper()
-                    content = msg.get('content', '')[:300]  # Limit message size
+                    content = msg.get('content', '')[:500]  # Allow longer message context
                     context_parts.append(f"{role}: {content}")
                 conversation_context = "\n".join(context_parts) + "\n\n"
                 logger.info(f"Including conversation history with {len(conversation_history)} messages for session {session_id}")

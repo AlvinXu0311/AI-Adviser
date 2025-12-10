@@ -82,24 +82,24 @@ export const Sidebar: FC<SidebarProps> = ({ isOpen, toggleSidebar, user, onLogou
     <motion.div
       initial={false}
       animate={{ 
-        width: isOpen ? 360 : 0,
-        x: isOpen ? 0 : -360 
+        width: isOpen ? 300 : 0,
+        x: isOpen ? 0 : -300 
       }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       className={`fixed inset-y-0 left-0 z-30 lg:relative bg-wpi-darkGrey text-white flex flex-col h-full border-r border-gray-800 shadow-xl overflow-hidden whitespace-nowrap`}
     >
-      <div className="p-6 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <a href="https://www.wpi.edu" target="_blank" rel="noopener noreferrer" className="w-14 h-14 rounded-lg flex items-center justify-center shadow-lg overflow-hidden hover:ring-2 hover:ring-wpi-red transition-all">
+      <div className="p-4 sm:p-6 flex items-center justify-between">
+        <div className="flex items-center space-x-3 sm:space-x-4">
+          <a href="https://www.wpi.edu" target="_blank" rel="noopener noreferrer" className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg flex items-center justify-center shadow-lg overflow-hidden hover:ring-2 hover:ring-wpi-red transition-all">
             <img src="/assets/WPI_ICON.jpg" alt="WPI Logo" className="w-full h-full object-cover" />
           </a>
           <div className="overflow-hidden">
-            <h1 className="font-bold text-2xl leading-tight">WPI Business</h1>
-            <span className="text-base text-gray-400 font-medium tracking-wider">DIGITAL ADVISER</span>
+            <h1 className="font-bold text-lg sm:text-2xl leading-tight">WPI Business</h1>
+            <span className="text-xs sm:text-base text-gray-400 font-medium tracking-wider">DIGITAL ADVISER</span>
           </div>
         </div>
         <button onClick={toggleSidebar} className="lg:hidden p-2 hover:bg-white/10 rounded">
-          <X className="w-7 h-7" />
+          <X className="w-6 h-6 sm:w-7 sm:h-7" />
         </button>
       </div>
 

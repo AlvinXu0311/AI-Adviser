@@ -123,9 +123,9 @@ Response Style:
             self.conversation_history.append(HumanMessage(content=message))
             self.conversation_history.append(response)
 
-            # Keep history manageable (last 10 messages)
-            if len(self.conversation_history) > 10:
-                self.conversation_history = self.conversation_history[-10:]
+            # Keep history manageable (last 20 messages for better context)
+            if len(self.conversation_history) > 20:
+                self.conversation_history = self.conversation_history[-20:]
 
             logger.info(f"Chat response generated: {len(response_text)} chars")
 

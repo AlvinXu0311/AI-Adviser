@@ -566,7 +566,7 @@ VITE_BACKEND_URL=http://localhost:8000
 ### Database Schema
 
 ```sql
--- Programs: MSIT, MSBA, MBA, MSM
+-- Programs: MSIT, MSBA, MBA, FinTech, MSOS
 CREATE TABLE programs (
     id INTEGER PRIMARY KEY,
     program_code TEXT,
@@ -622,7 +622,7 @@ The vector database provides semantic search capabilities with **course-aware ch
 |------------|-------|-------------|
 | pdf_chunks | 272 | Course-aware chunks from PDF catalogs |
 | courses | 89 | Course descriptions with embeddings |
-| programs | 4 | MSIT, MSBA, MBA, MSM program details |
+| programs | 6 | MSIT, MSBA, MBA, FinTech, MSOS program details |
 | specialties | 7 | Specialty focus areas |
 
 **PDF Sources Indexed:**

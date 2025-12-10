@@ -133,14 +133,14 @@ export const InputArea: FC<InputAreaProps> = ({ onSendMessage, onFileUpload, dis
         accept=".pdf,.doc,.docx,.jpg,.png,.jpeg"
       />
 
-      <div className="absolute left-4 flex items-center space-x-2">
+      <div className="absolute left-2 sm:left-4 flex items-center space-x-2">
         <button 
           onClick={handlePaperclipClick}
-          className="p-3 text-gray-400 hover:text-wpi-red hover:bg-gray-100 rounded-full transition-colors"
+          className="p-2 sm:p-3 text-gray-400 hover:text-wpi-red hover:bg-gray-100 rounded-full transition-colors"
           disabled={disabled}
           title="Upload Transcript"
         >
-          <Paperclip size={28} />
+          <Paperclip size={22} className="sm:w-7 sm:h-7" />
         </button>
       </div>
       
@@ -149,29 +149,29 @@ export const InputArea: FC<InputAreaProps> = ({ onSendMessage, onFileUpload, dis
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={placeholder ?? (disabled ? "Agent is thinking..." : "Ask questions or upload your transcript...")}
+        placeholder={placeholder ?? (disabled ? "Agent is thinking..." : "Ask a question...")}
         disabled={disabled}
-        className="w-full pl-16 pr-20 py-5 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-wpi-red/20 focus:border-wpi-red transition-all shadow-inner text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full pl-12 sm:pl-16 pr-14 sm:pr-20 py-3 sm:py-5 bg-gray-50 border border-gray-200 rounded-xl sm:rounded-2xl focus:outline-none focus:ring-2 focus:ring-wpi-red/20 focus:border-wpi-red transition-all shadow-inner text-base sm:text-xl disabled:opacity-50 disabled:cursor-not-allowed"
       />
 
-      <div className="absolute right-4 flex items-center space-x-2">
+      <div className="absolute right-2 sm:right-4 flex items-center space-x-1 sm:space-x-2">
         {input.trim() ? (
           <button
             onClick={handleSend}
             disabled={disabled}
-            className="p-3 bg-wpi-red text-white rounded-xl shadow-md hover:bg-wpi-redDark hover:shadow-lg transform active:scale-95 transition-all disabled:opacity-50 disabled:transform-none"
+            className="p-2 sm:p-3 bg-wpi-red text-white rounded-lg sm:rounded-xl shadow-md hover:bg-wpi-redDark hover:shadow-lg transform active:scale-95 transition-all disabled:opacity-50 disabled:transform-none"
           >
-            <Send size={26} />
+            <Send size={20} className="sm:w-[26px] sm:h-[26px]" />
           </button>
         ) : (
           <button 
             onClick={handleMicClick}
-            className={`p-3 rounded-full transition-colors ${isRecording ? 'text-wpi-red bg-wpi-red/10' : 'text-gray-400 hover:text-gray-600'}`}
+            className={`p-2 sm:p-3 rounded-full transition-colors ${isRecording ? 'text-wpi-red bg-wpi-red/10' : 'text-gray-400 hover:text-gray-600'}`}
             disabled={disabled || !speechSupported}
             title={speechSupported ? (isRecording ? 'Stop recording' : 'Record a question') : 'Speech recognition not supported in this browser'}
             aria-pressed={isRecording}
           >
-            <Mic size={28} />
+            <Mic size={22} className="sm:w-7 sm:h-7" />
           </button>
         )}
       </div>

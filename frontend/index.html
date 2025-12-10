@@ -27,7 +27,12 @@
     </script>
     <style>
       html {
-        font-size: 20px; /* Base font size increased */
+        font-size: 10px; /* Smaller base font for mobile-first */
+      }
+      @media (min-width: 640px) {
+        html {
+          font-size: 16px; /* Normal size on tablets and up */
+        }
       }
       body {
         margin: 0;

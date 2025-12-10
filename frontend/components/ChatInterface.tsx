@@ -252,13 +252,13 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
 
       {/* Suggestion Chips */}
       {chatState.messages.length === 1 && !chatState.isLoading && (
-        <div className="px-8 pb-4">
-          <div className="flex flex-wrap gap-4 justify-center">
+        <div className="px-3 sm:px-8 pb-3 sm:pb-4">
+          <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
             {SAMPLE_QUESTIONS.map((q, i) => (
               <button
                 key={i}
                 onClick={() => handleSendMessage(q)}
-                className="text-sm bg-white border border-gray-200 hover:border-wpi-red hover:text-wpi-red text-gray-600 px-4 py-2 rounded-full transition-colors shadow-sm"
+                className="text-xs sm:text-sm bg-white border border-gray-200 hover:border-wpi-red hover:text-wpi-red text-gray-600 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full transition-colors shadow-sm"
               >
                 {q}
               </button>
@@ -268,16 +268,16 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
       )}
 
       {/* Input Area */}
-      <div className="p-6 bg-white border-t border-gray-100 shadow-sm relative z-10">
+      <div className="p-3 sm:p-6 bg-white border-t border-gray-100 shadow-sm relative z-10">
         <div className="max-w-5xl mx-auto">
           <InputArea 
             onSendMessage={handleSendMessage} 
             onFileUpload={handleFileUpload} 
             disabled={chatState.isLoading}
           />
-          <div className="text-center mt-3">
-            <p className="text-sm text-gray-400">
-              AI-generated responses powered by WPI RAG & Agentic LLM. Check official documents for binding policies.
+          <div className="text-center mt-2 sm:mt-3">
+            <p className="text-xs sm:text-sm text-gray-400">
+              AI-generated responses. Check official documents for binding policies.
             </p>
           </div>
         </div>
