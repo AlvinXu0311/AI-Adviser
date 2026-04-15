@@ -38,19 +38,35 @@ trap cleanup INT TERM
 # Step 1: Clean up existing processes
 # =============================================================================
 echo "[Step 1/4] Cleaning up..."
+
+# Kill processes by name
+echo "  Stopping existing processes..."
 pkill -9 -f "uvicorn" 2>/dev/null || true
 pkill -9 -f "vite" 2>/dev/null || true
 pkill -9 -f "node.*frontend" 2>/dev/null || true
+pkill -9 -f "python.*app.main" 2>/dev/null || true
 
+# Clean up ports - try multiple methods
+echo "  Freeing ports..."
 for PORT in $BACKEND_PORT $FRONTEND_PORT 5173 5174; do
-    PID=$(lsof -ti :$PORT 2>/dev/null)
-    if [ -n "$PID" ]; then
-        kill -9 $PID 2>/dev/null
-        echo "  Freed port $PORT"
+    # Method 1: lsof
+    PIDS=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$PIDS" ]; then
+        for PID in $PIDS; do
+            kill -9 $PID 2>/dev/null || true
+            echo "    Killed PID $PID on port $PORT"
+        done
+    fi
+
+    # Method 2: fuser (fallback)
+    if lsof -ti :$PORT >/dev/null 2>&1; then
+        fuser -k -9 $PORT/tcp 2>/dev/null || true
+        echo "    Force freed port $PORT"
     fi
 done
-sleep 1
-echo -e "  ${GREEN}Done${NC}"
+
+sleep 2
+echo -e "  ${GREEN}Cleanup complete${NC}"
 
 # =============================================================================
 # Step 2: Check prerequisites

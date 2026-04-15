@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WPI AI Adviser - Complete System Design</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                fontSize: '14px'
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 40px;
+            font-size: 1.1em;
+        }
+        .diagram-container {
+            margin: 30px 0;
+            padding: 25px;
+            background: #fafafa;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+        }
+        .diagram-container h2 {
+            color: #34495e;
+            margin-top: 0;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .section {
+            margin: 30px 0;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .tech-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .tech-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .tech-card h4 {
+            margin: 0 0 15px 0;
+            color: #3498db;
+            font-size: 1.2em;
+        }
+        .tech-card ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .tech-card li {
+            padding: 8px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .tech-card li:last-child {
+            border-bottom: none;
+        }
+        .tech-card li strong {
+            color: #2c3e50;
+        }
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .feature-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 3px solid #27ae60;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .feature-item strong {
+            color: #27ae60;
+        }
+        .data-flow-steps {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .data-flow-steps ol {
+            padding-left: 20px;
+        }
+        .data-flow-steps li {
+            padding: 10px 0;
+            line-height: 1.6;
+        }
+        .architecture-notes {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .architecture-notes h4 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .architecture-notes ul {
+            margin-bottom: 0;
+        }
+        .mermaid {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WPI Business School AI Adviser</h1>
+        <p class="subtitle">Complete System Design & Architecture Documentation</p>
+
+        <!-- High-Level Architecture -->
+        <div class="diagram-container">
+            <h2>🏗️ High-Level System Architecture</h2>
+            <div class="mermaid">
+graph TB
+    subgraph "Client Layer"
+        USER[WPI Student<br/>Browser Client]
+        USER --> AUTH[Microsoft SSO<br/>@wpi.edu validation]
+    end
+
+    subgraph "Frontend Layer - React SPA"
+        AUTH --> APP[App.tsx<br/>Main Application]
+        APP --> CHAT[ChatInterface<br/>Real-time Messaging]
+        APP --> PDF[PdfUpload<br/>Transcript Upload]
+        APP --> SIDEBAR[Sidebar<br/>Navigation]
+
+        CHAT --> CHATSVC[chatService.ts<br/>SSE Streaming Client]
+        PDF --> PDFSVC[pdfUpload.service.ts<br/>File Upload Service]
+        APP --> SESSION[SessionStorage<br/>session_id + user_id]
+    end
+
+    subgraph "API Gateway"
+        NGINX[Nginx Reverse Proxy<br/>:8080 → :80]
+        NGINX --> CORS[CORS Handler<br/>Allowed Origins]
+    end
+
+    subgraph "Backend Layer - FastAPI"
+        subgraph "API Endpoints"
+            CHATEP[POST /api/chat<br/>StreamingResponse]
+            TRANSEP[POST /api/extract-transcript<br/>PDF Processing]
+            STATUSEP[GET /api/status<br/>Health Check]
+            SUMMARYEP[GET /api/summary<br/>Session Summary]
+            ADMINEP[/api/admin/*<br/>Admin Operations]
+        end
+
+        subgraph "Agent System - LangChain ReAct"
+            INTENT[Intent Agent<br/>Query Classification]
+            ADVISER[Adviser Agent<br/>Academic Advising]
+            TOOLS[Agent Tools<br/>7 Tools Available]
+
+            INTENT --> |is_academic=true| ADVISER
+            ADVISER --> TOOLS
+        end
+
+        subgraph "Core Services"
+            LLM[LLM Service<br/>Google Gemini 2.5-pro]
+            CONTEXT[Context Manager<br/>Session-based Storage]
+            MEMORY[Conversation Memory<br/>Redis-backed]
+            PDFEX[PDF Extraction Service<br/>PyMuPDF]
+            VECTORSVC[PDF Vector Service<br/>ChromaDB Search]
+            DBSVC[Program DB Service<br/>SQLite Queries]
+        end
+
+        subgraph "Tools Implementation"
+            TOOL1[smart_course_search<br/>DB-first + RAG]
+            TOOL2[program_search<br/>Program Info]
+            TOOL3[degree_progress<br/>Graduation Check]
+            TOOL4[student_context<br/>Transcript Data]
+            TOOL5[semantic_search<br/>PDF Fallback]
+            TOOL6[business_school_database<br/>Direct SQL]
+            TOOL7[pdf_context<br/>Long Context]
+        end
+    end
+
+    subgraph "Data Layer"
+        subgraph "Primary Database"
+            SQLITE[(SQLite<br/>bus_school.db)]
+            SQLITE --> PROG_TBL[programs<br/>MSIT, MSBA, MBA, etc.]
+            SQLITE --> COURSE_TBL[courses<br/>Course Catalog]
+            SQLITE --> REQ_TBL[requirements<br/>Degree Requirements]
+            SQLITE --> SPEC_TBL[specializations<br/>Specialty Tracks]
+        end
+
+        subgraph "Vector Database"
+            CHROMA[(ChromaDB<br/>Persistent Storage)]
+            CHROMA --> PDFEMB[PDF Embeddings<br/>Academic Catalogs]
+            PDFEMB --> CAT1[Bus-school courses.pdf]
+            PDFEMB --> CAT2[Masters Programs.pdf]
+            PDFEMB --> CAT3[Math Courses.pdf]
+            PDFEMB --> CAT4[CS Courses.pdf]
+        end
+
+        subgraph "Cache & Session Store"
+            REDIS[(Redis<br/>Port 6379)]
+            REDIS --> SESSDATA[Session Data<br/>TTL: 24h]
+            REDIS --> CONVHIST[Conversation History<br/>message_store:*]
+            REDIS --> STUDCTX[Student Context<br/>Transcript Cache]
+        end
+    end
+
+    subgraph "External Services"
+        GEMINI[Google Gemini API<br/>gemini-2.5-flash<br/>gemini-2.5-flash]
+        MSAUTH[Microsoft Azure AD B2C<br/>OAuth 2.0]
+        EMBED[Google Embeddings API<br/>embedding-001]
+    end
+
+    %% Data Flow
+    CHATSVC --> NGINX
+    PDFSVC --> NGINX
+    NGINX --> CHATEP
+    NGINX --> TRANSEP
+
+    CHATEP --> INTENT
+    ADVISER --> LLM
+    LLM --> GEMINI
+
+    TOOLS --> TOOL1
+    TOOLS --> TOOL2
+    TOOLS --> TOOL3
+    TOOLS --> TOOL4
+    TOOLS --> TOOL5
+    TOOLS --> TOOL6
+    TOOLS --> TOOL7
+
+    TOOL1 --> DBSVC
+    TOOL1 --> VECTORSVC
+    TOOL2 --> DBSVC
+    TOOL2 --> VECTORSVC
+    TOOL3 --> DBSVC
+    TOOL3 --> CONTEXT
+    TOOL4 --> CONTEXT
+    TOOL5 --> VECTORSVC
+    TOOL6 --> DBSVC
+    TOOL7 --> VECTORSVC
+
+    DBSVC --> SQLITE
+    VECTORSVC --> CHROMA
+    VECTORSVC --> EMBED
+
+    CHATEP --> MEMORY
+    MEMORY --> REDIS
+
+    TRANSEP --> PDFEX
+    PDFEX --> CONTEXT
+    CONTEXT --> REDIS
+
+    AUTH --> MSAUTH
+
+    %% Styling
+    classDef clientStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:3px
+    classDef frontendStyle fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    classDef backendStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef dataStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef externalStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef agentStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+
+    class USER,AUTH clientStyle
+    class APP,CHAT,PDF,SIDEBAR,CHATSVC,PDFSVC,SESSION frontendStyle
+    class CHATEP,TRANSEP,STATUSEP,SUMMARYEP,ADMINEP,LLM,CONTEXT,MEMORY,PDFEX,VECTORSVC,DBSVC backendStyle
+    class INTENT,ADVISER,TOOLS,TOOL1,TOOL2,TOOL3,TOOL4,TOOL5,TOOL6,TOOL7 agentStyle
+    class SQLITE,PROG_TBL,COURSE_TBL,REQ_TBL,SPEC_TBL,CHROMA,PDFEMB,CAT1,CAT2,CAT3,CAT4,REDIS,SESSDATA,CONVHIST,STUDCTX dataStyle
+    class GEMINI,MSAUTH,EMBED externalStyle
+            </div>
+        </div>
+
+        <!-- Detailed Chat Flow -->
+        <div class="diagram-container">
+            <h2>💬 Complete Chat Request Flow (with Intent Classification)</h2>
+            <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant N as Nginx
+    participant API as Chat API
+    participant INT as Intent Agent
+    participant MEM as Redis Memory
+    participant ADV as Adviser Agent
+    participant TOOLS as Agent Tools
+    participant DB as SQLite DB
+    participant VEC as ChromaDB
+    participant LLM as Gemini API
+
+    U->>F: Type message + click send
+    F->>F: Get session_id from storage
+    F->>N: POST /api/chat<br/>{message, session_id, topic_id}
+    N->>API: Forward request
+
+    Note over API: Layer 1: Basic Sanity Check
+    API->>API: validate_query_basic_sanity()
+
+    Note over API: Layer 2: Intent Classification
+    API->>MEM: Get conversation history
+    MEM-->>API: Last 6 messages
+    API->>INT: classify(message, history)
+    INT->>LLM: Gemini Flash + context
+    LLM-->>INT: {intent, confidence, is_academic}
+
+    alt Not Academic or Low Confidence
+        INT-->>API: is_academic=false
+        API-->>F: "Not sure how to help..."
+        F-->>U: Display error message
+    else Academic Query
+        INT-->>API: is_academic=true, confidence>0.2
+        API->>MEM: Store user message
+        API->>ADV: answer_query(query, context)
+
+        Note over ADV: ReAct Pattern Loop
+        loop Multiple Tool Uses
+            ADV->>LLM: Thought + Action decision
+            LLM-->>ADV: Next action (tool name)
+            ADV->>TOOLS: Execute tool
+
+            alt Course Search
+                TOOLS->>DB: SQL query (courses table)
+                DB-->>TOOLS: Course data (instructor, credits)
+                TOOLS->>VEC: Semantic search (fallback)
+                VEC-->>TOOLS: PDF context (description)
+            else Program Search
+                TOOLS->>DB: SQL query (programs table)
+                DB-->>TOOLS: Program requirements
+                TOOLS->>VEC: PDF search (catalog details)
+                VEC-->>TOOLS: Supplementary info
+            else Degree Progress
+                TOOLS->>MEM: Get student context
+                MEM-->>TOOLS: Completed courses
+                TOOLS->>DB: Get program requirements
+                DB-->>TOOLS: Required courses
+                TOOLS->>TOOLS: Compare and analyze
+            else Student Context
+                TOOLS->>MEM: Get cached transcript
+                MEM-->>TOOLS: Student GPA, courses
+            end
+
+            TOOLS-->>ADV: Tool result (Observation)
+        end
+
+        ADV->>LLM: Generate final answer with all tool results
+        LLM-->>ADV: Formatted response
+        ADV->>MEM: Store AI message
+        ADV-->>API: {response, source, tools_used}
+        API-->>F: SSE Stream chunks
+        F-->>U: Display streaming response
+    end
+            </div>
+        </div>
+
+        <!-- Transcript Upload Flow -->
+        <div class="diagram-container">
+            <h2>📄 Transcript Upload & Processing Flow</h2>
+            <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant N as Nginx
+    participant API as Transcript API
+    participant PDF as PDF Extraction
+    participant CTX as Context Manager
+    participant REDIS as Redis Cache
+
+    U->>F: Upload PDF transcript
+    F->>F: Validate file (PDF, <10MB)
+    F->>N: POST /api/extract-transcript<br/>FormData + session_id
+    N->>API: Forward multipart request
+
+    API->>PDF: extract_from_pdf(file_bytes)
+    PDF->>PDF: PyMuPDF text extraction
+    PDF->>PDF: Regex parsing:<br/>- Student info<br/>- GPA<br/>- Courses<br/>- Grades
+    PDF-->>API: ExtractedTranscriptData
+
+    API->>CTX: set_student_context(session_id, data)
+    CTX->>REDIS: Store student context<br/>TTL: 24 hours
+    CTX-->>API: Success
+
+    API-->>F: {student_name, gpa, courses_count}
+    F->>F: Update UI state
+    F-->>U: "Transcript uploaded successfully"
+
+    Note over U,REDIS: Context now available for:<br/>- degree_progress tool<br/>- student_context tool<br/>- Personalized recommendations
+            </div>
+        </div>
+
+        <!-- Agent Tools Architecture -->
+        <div class="diagram-container">
+            <h2>🛠️ Agent Tools - Unified Search Strategy</h2>
+            <div class="mermaid">
+graph LR
+    subgraph "Tool Layer"
+        T1[smart_course_search]
+        T2[program_search]
+        T3[degree_progress]
+        T4[student_context]
+        T5[semantic_search]
+        T6[business_school_database]
+        T7[pdf_context]
+    end
+
+    subgraph "Unified Search Logic"
+        SEARCH[unified_search]
+        SEARCH --> ATTEMPT1[Attempt 1: DB Query]
+        SEARCH --> ATTEMPT2[Attempt 2: RAG Search]
+        SEARCH --> ATTEMPT3[Attempt 3: Keyword Variations]
+        ATTEMPT1 --> VALIDATE{Validate Results}
+        ATTEMPT2 --> VALIDATE
+        ATTEMPT3 --> VALIDATE
+        VALIDATE --> |Valid| RETURN[Return Best Match]
+        VALIDATE --> |Invalid| RETRY[Retry with New Query]
+    end
+
+    subgraph "Data Sources"
+        DB[(SQLite DB)]
+        VEC[(ChromaDB Vectors)]
+        REDIS[(Redis Cache)]
+    end
+
+    T1 --> SEARCH
+    T2 --> SEARCH
+    T5 --> SEARCH
+
+    SEARCH --> DB
+    SEARCH --> VEC
+
+    T3 --> DB
+    T3 --> REDIS
+    T4 --> REDIS
+    T6 --> DB
+    T7 --> VEC
+
+    style SEARCH fill:#fff9c4,stroke:#f57f17,stroke-width:3px
+    style VALIDATE fill:#ffccbc,stroke:#bf360c,stroke-width:2px
+    style DB fill:#fff3e0,stroke:#e65100
+    style VEC fill:#fff3e0,stroke:#e65100
+    style REDIS fill:#fff3e0,stroke:#e65100
+            </div>
+        </div>
+
+        <!-- Database Schema -->
+        <div class="diagram-container">
+            <h2>💾 Database Schema (SQLite)</h2>
+            <div class="mermaid">
+erDiagram
+    PROGRAMS ||--o{ SPECIALIZATIONS : "has"
+    PROGRAMS ||--o{ REQUIREMENTS : "defines"
+    COURSES ||--o{ REQUIREMENTS : "satisfies"
+    COURSES ||--o{ COURSE_OFFERINGS : "offered_as"
+
+    PROGRAMS {
+        int program_id PK
+        string program_code UK "MSIT, MSBA, MBA"
+        string program_name
+        int total_credits "30-48 credits"
+        text description
+        text admission_requirements
+    }
+
+    SPECIALIZATIONS {
+        int specialization_id PK
+        int program_id FK
+        string name "AI/ML, Analytics, etc"
+        int credits_required
+        text description
+    }
+
+    REQUIREMENTS {
+        int requirement_id PK
+        int program_id FK
+        int specialization_id FK "nullable"
+        string requirement_type "core, elective, capstone"
+        string course_code FK
+        int credits_required
+        boolean is_mandatory
+    }
+
+    COURSES {
+        string course_code PK "MIS 520"
+        string course_name
+        int credits "3.0"
+        text description
+        text prerequisites
+        string department "MIS, OIE, CS"
+    }
+
+    COURSE_OFFERINGS {
+        int offering_id PK
+        string course_code FK
+        string instructor
+        string semester "A-term, B-term"
+        string year "2024-25"
+        string schedule "Mon/Wed 6-7:30pm"
+        int enrollment_limit
+    }
+            </div>
+        </div>
+
+        <!-- Technology Stack -->
+        <div class="section">
+            <h3>🔧 Technology Stack Details</h3>
+            <div class="tech-grid">
+                <div class="tech-card">
+                    <h4>Frontend Technologies</h4>
+                    <ul>
+                        <li><strong>React 19.2.1</strong> - UI library</li>
+                        <li><strong>TypeScript</strong> - Type safety</li>
+                        <li><strong>Vite 6.2.0</strong> - Build tool (fast HMR)</li>
+                        <li><strong>Framer Motion 12.23</strong> - Smooth animations</li>
+                        <li><strong>MSAL Browser 4.27</strong> - Microsoft Auth</li>
+                        <li><strong>MSAL React 3.0</strong> - React integration</li>
+                        <li><strong>React Markdown 10.1</strong> - Message rendering</li>
+                        <li><strong>Remark GFM 4.0</strong> - GitHub Flavored Markdown</li>
+                        <li><strong>Lucide React 0.554</strong> - Icon system</li>
+                        <li><strong>jsPDF 3.0</strong> - PDF generation</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Backend Technologies</h4>
+                    <ul>
+                        <li><strong>FastAPI 0.111</strong> - Async web framework</li>
+                        <li><strong>Uvicorn 0.29</strong> - ASGI server</li>
+                        <li><strong>Python 3.12</strong> - Runtime</li>
+                        <li><strong>LangChain 0.2</strong> - Agent framework</li>
+                        <li><strong>LangChain Google GenAI</strong> - Gemini integration</li>
+                        <li><strong>LangChain Community</strong> - Redis tools</li>
+                        <li><strong>Pydantic 2.8</strong> - Data validation</li>
+                        <li><strong>Python-dotenv 1.0</strong> - Environment config</li>
+                        <li><strong>HTTPX 0.27</strong> - HTTP client</li>
+                        <li><strong>Python-multipart 0.0.9</strong> - File uploads</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>AI & ML Stack</h4>
+                    <ul>
+                        <li><strong>Google Gemini 2.5-pro</strong> - Main LLM</li>
+                        <li><strong>Google Gemini 2.5-flash</strong> - Intent classifier</li>
+                        <li><strong>Google Embeddings API</strong> - embedding-001</li>
+                        <li><strong>ChromaDB 1.3.5</strong> - Vector database</li>
+                        <li><strong>Sentence Transformers 2.7</strong> - Local embeddings</li>
+                        <li><strong>Rank BM25 0.2.2</strong> - Keyword search</li>
+                        <li><strong>PyMuPDF 1.24</strong> - PDF text extraction</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Data & Storage</h4>
+                    <ul>
+                        <li><strong>SQLite 3</strong> - Primary database</li>
+                        <li><strong>SQLAlchemy 2.0</strong> - ORM (if needed)</li>
+                        <li><strong>Redis 5.0</strong> - Cache & sessions</li>
+                        <li><strong>Redis Python Client</strong> - Redis driver</li>
+                        <li><strong>ChromaDB Persistent</strong> - Vector storage</li>
+                        <li><strong>PostgreSQL Support</strong> - psycopg[binary] 3.2</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Testing & Quality</h4>
+                    <ul>
+                        <li><strong>Pytest 8.2</strong> - Test framework</li>
+                        <li><strong>Pytest-asyncio 0.23</strong> - Async testing</li>
+                        <li><strong>Pytest-mock 3.14</strong> - Mocking</li>
+                        <li><strong>Pytest-cov 5.0</strong> - Coverage reports</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Deployment & DevOps</h4>
+                    <ul>
+                        <li><strong>Docker Compose</strong> - Multi-container orchestration</li>
+                        <li><strong>Nginx</strong> - Reverse proxy + static files</li>
+                        <li><strong>Alpine Linux</strong> - Lightweight containers</li>
+                        <li><strong>Health Checks</strong> - Service monitoring</li>
+                        <li><strong>Bridge Network</strong> - Container networking</li>
+                        <li><strong>Named Volumes</strong> - Data persistence</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Features -->
+        <div class="section">
+            <h3>🌟 System Features & Capabilities</h3>
+            <div class="feature-list">
+                <div class="feature-item">
+                    <strong>Secure Authentication</strong><br/>
+                    Microsoft SSO with @wpi.edu domain validation
+                </div>
+                <div class="feature-item">
+                    <strong>Real-time Streaming</strong><br/>
+                    Server-Sent Events (SSE) for live chat responses
+                </div>
+                <div class="feature-item">
+                    <strong>Intent Classification</strong><br/>
+                    2-layer validation: sanity check + LLM intent detection
+                </div>
+                <div class="feature-item">
+                    <strong>ReAct Agent Pattern</strong><br/>
+                    Reasoning + Acting with autonomous tool use
+                </div>
+                <div class="feature-item">
+                    <strong>Unified Search</strong><br/>
+                    DB-first with RAG fallback + retry logic (3 attempts)
+                </div>
+                <div class="feature-item">
+                    <strong>Conversation Memory</strong><br/>
+                    Redis-backed history (last 20 messages, 24h TTL)
+                </div>
+                <div class="feature-item">
+                    <strong>PDF Processing</strong><br/>
+                    PyMuPDF extraction with regex pattern matching
+                </div>
+                <div class="feature-item">
+                    <strong>Session Management</strong><br/>
+                    Context isolation per browser session (24h expiry)
+                </div>
+                <div class="feature-item">
+                    <strong>Semantic Search</strong><br/>
+                    ChromaDB vector search with course-aware ranking
+                </div>
+                <div class="feature-item">
+                    <strong>Degree Progress</strong><br/>
+                    Automated graduation requirement checking
+                </div>
+                <div class="feature-item">
+                    <strong>Dynamic Programs</strong><br/>
+                    Database-driven program list (MSIT, MSBA, MBA, etc.)
+                </div>
+                <div class="feature-item">
+                    <strong>Multi-turn Conversations</strong><br/>
+                    Context-aware responses with conversation history
+                </div>
+                <div class="feature-item">
+                    <strong>Topic Selection</strong><br/>
+                    "General Advising" vs "Courses & Planning" guidance
+                </div>
+                <div class="feature-item">
+                    <strong>Smart Course Matching</strong><br/>
+                    Cross-listed course detection (e.g., DS/ECE 577)
+                </div>
+                <div class="feature-item">
+                    <strong>Instructor Lookup</strong><br/>
+                    "Who teaches X?" answered from course_offerings table
+                </div>
+                <div class="feature-item">
+                    <strong>Error Handling</strong><br/>
+                    Graceful degradation with fallback strategies
+                </div>
+            </div>
+        </div>
+
+        <!-- Architecture Decisions -->
+        <div class="architecture-notes">
+            <h4>🎯 Key Architecture Decisions</h4>
+            <ul>
+                <li><strong>Database-First Strategy:</strong> SQLite provides authoritative, structured data (instructor, credits, schedules). RAG (ChromaDB) supplements with detailed descriptions from PDFs.</li>
+                <li><strong>ReAct Pattern:</strong> LangChain agent uses Reasoning + Acting loop. Agent autonomously decides which tools to use and when, enabling complex multi-step queries.</li>
+                <li><strong>Intent Classification:</strong> 2-layer validation prevents wasted LLM calls. Layer 1: basic sanity check. Layer 2: LLM-powered intent classification with conversation context.</li>
+                <li><strong>Unified Search with Retry:</strong> All search tools share common logic: try DB → try RAG → retry with query variations (up to 3 attempts). Prevents "not found" errors.</li>
+                <li><strong>Session-based Isolation:</strong> Each browser session gets unique session_id. Student context (transcript) and conversation history isolated per session, preventing data leakage.</li>
+                <li><strong>Redis for State:</strong> Conversation history and student context cached in Redis with 24h TTL. Enables fast retrieval and automatic cleanup.</li>
+                <li><strong>Streaming Responses:</strong> SSE (Server-Sent Events) for real-time streaming. Frontend receives chunks as LLM generates them, improving perceived performance.</li>
+                <li><strong>Course-Aware Vector Search:</strong> ChromaDB search boosts results that match course codes in metadata (0.3-0.5 score boost). Solves cross-listed course problem (e.g., "ECE 577" finds "DS/ECE 577").</li>
+                <li><strong>Semantic Chunking:</strong> PDFs chunked by course boundaries (regex pattern matching). Each chunk = complete course info (code + title + description), improving retrieval accuracy.</li>
+                <li><strong>Dynamic Program Loading:</strong> Agent prompt includes program list fetched from database at runtime. New programs auto-detected without code changes.</li>
+                <li><strong>Multi-turn Context:</strong> Last 6 messages (3 turns) sent to intent classifier. Last 20 messages sent to adviser agent. Enables follow-up questions like "tell me more" or "what about MSBA?"</li>
+                <li><strong>Tool Hierarchy:</strong> smart_course_search (primary for courses) → program_search (primary for programs) → semantic_search (fallback). Ensures most accurate tool selected first.</li>
+            </ul>
+        </div>
+
+        <!-- Data Flow Steps -->
+        <div class="section">
+            <h3>📊 Detailed Request Processing Steps</h3>
+            <div class="data-flow-steps">
+                <ol>
+                    <li><strong>User Authentication:</strong> Microsoft SSO validates @wpi.edu email. MSAL library manages OAuth 2.0 flow and token refresh.</li>
+                    <li><strong>Session Initialization:</strong> Frontend generates session_id (UUID) on first message, stored in sessionStorage. Sent with every request.</li>
+                    <li><strong>Message Submission:</strong> User types message → Frontend calls chatService.sendMessage() → POST /api/chat with {message, session_id, topic_id}</li>
+                    <li><strong>Layer 1 Validation:</strong> Basic sanity check (not empty, contains alphanumeric). Rejects garbage input immediately.</li>
+                    <li><strong>Memory Retrieval:</strong> Redis fetch: get conversation history (message_store:{session_id}). Last 6 messages retrieved for intent classification.</li>
+                    <li><strong>Layer 2 Intent Classification:</strong> Intent Agent (Gemini Flash) analyzes message + conversation history → {intent, confidence, is_academic, requires_transcript}. Rejects if not academic or confidence < 0.2.</li>
+                    <li><strong>Context Loading:</strong> If transcript uploaded, Context Manager retrieves student data from Redis (student name, GPA, completed courses).</li>
+                    <li><strong>Agent Invocation:</strong> Adviser Agent (Gemini Pro) receives: query + conversation history (20 msgs) + student context + topic guidance.</li>
+                    <li><strong>ReAct Loop:</strong> Agent generates Thought → decides Action (tool) → executes Tool → receives Observation → repeats (max 10 iterations).</li>
+                    <li><strong>Tool Execution:</strong> Each tool uses unified_search: DB query (attempt 1) → RAG search (attempt 2) → keyword variations (attempt 3). Returns best match or empty.</li>
+                    <li><strong>Response Generation:</strong> After sufficient tool use, agent generates Final Answer. LLM streams response in chunks.</li>
+                    <li><strong>Memory Storage:</strong> User message and AI response saved to Redis (message_store:{session_id}). TTL refreshed to 24h.</li>
+                    <li><strong>Response Streaming:</strong> Backend yields SSE events (data: {type, content}). Frontend parses and displays chunks in real-time.</li>
+                    <li><strong>Session Cleanup:</strong> Redis auto-expires sessions after 24h inactivity. Context Manager evicts oldest 10% if > 1000 active sessions (LRU policy).</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Performance & Scalability -->
+        <div class="section">
+            <h3>⚡ Performance & Scalability Considerations</h3>
+            <div class="tech-grid">
+                <div class="tech-card">
+                    <h4>Response Times</h4>
+                    <ul>
+                        <li><strong>Intent Classification:</strong> 1-2 seconds (Gemini Flash, timeout: 6s)</li>
+                        <li><strong>Simple Query:</strong> 3-5 seconds (1-2 tool uses)</li>
+                        <li><strong>Complex Query:</strong> 8-15 seconds (3-5 tool uses)</li>
+                        <li><strong>Degree Progress:</strong> 5-10 seconds (DB comparison)</li>
+                        <li><strong>PDF Upload:</strong> 2-5 seconds (extraction + storage)</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Caching Strategy</h4>
+                    <ul>
+                        <li><strong>Conversation History:</strong> Redis (24h TTL, max 100 msgs/session)</li>
+                        <li><strong>Student Context:</strong> Redis (24h TTL, touch on access)</li>
+                        <li><strong>Vector Embeddings:</strong> ChromaDB persistent storage (no re-embedding)</li>
+                        <li><strong>Database Queries:</strong> No caching (data changes infrequently)</li>
+                        <li><strong>Session Cleanup:</strong> Auto-expiration via Redis TTL</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Scalability Limits</h4>
+                    <ul>
+                        <li><strong>Max Concurrent Sessions:</strong> 1000 (Context Manager limit)</li>
+                        <li><strong>Redis Memory:</strong> ~100MB for 1000 sessions</li>
+                        <li><strong>ChromaDB Size:</strong> ~50MB (4 PDFs, 500 chunks)</li>
+                        <li><strong>SQLite DB Size:</strong> ~10MB (programs, courses, requirements)</li>
+                        <li><strong>Gemini API Rate Limit:</strong> 60 requests/minute (free tier)</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Optimization Techniques</h4>
+                    <ul>
+                        <li><strong>Streaming Responses:</strong> Reduces perceived latency</li>
+                        <li><strong>DB-First Search:</strong> Avoids slow vector search when possible</li>
+                        <li><strong>Query Retry Logic:</strong> 3 attempts with variations (improves recall)</li>
+                        <li><strong>Batch Embedding:</strong> 50 documents at a time (prevents memory issues)</li>
+                        <li><strong>Course-Aware Ranking:</strong> Boosts relevant results (improves precision)</li>
+                        <li><strong>LRU Eviction:</strong> Oldest 10% evicted when limit reached</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security & Privacy -->
+        <div class="section">
+            <h3>🔒 Security & Privacy Measures</h3>
+            <div class="tech-grid">
+                <div class="tech-card">
+                    <h4>Authentication & Authorization</h4>
+                    <ul>
+                        <li><strong>Microsoft SSO:</strong> Only @wpi.edu emails allowed</li>
+                        <li><strong>OAuth 2.0:</strong> Industry-standard auth protocol</li>
+                        <li><strong>Token Refresh:</strong> MSAL auto-refreshes access tokens</li>
+                        <li><strong>Session Isolation:</strong> Each session has unique ID</li>
+                        <li><strong>No Persistent User DB:</strong> No user data stored long-term</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Data Privacy</h4>
+                    <ul>
+                        <li><strong>Session-Based Storage:</strong> Data isolated per session_id</li>
+                        <li><strong>Auto-Expiration:</strong> All data deleted after 24h inactivity</li>
+                        <li><strong>No Cross-Session Leakage:</strong> Context Manager enforces isolation</li>
+                        <li><strong>Transcript Data:</strong> Stored in memory (Redis), not disk</li>
+                        <li><strong>No Logging of PII:</strong> Student names/IDs not logged</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Network Security</h4>
+                    <ul>
+                        <li><strong>CORS:</strong> Only allowed origins (localhost + production)</li>
+                        <li><strong>Nginx Proxy:</strong> Hides backend port from public</li>
+                        <li><strong>HTTPS Ready:</strong> SSL/TLS support (production)</li>
+                        <li><strong>Rate Limiting:</strong> Gemini API limits (60 req/min)</li>
+                        <li><strong>Input Validation:</strong> Pydantic schemas + sanity checks</li>
+                    </ul>
+                </div>
+
+                <div class="tech-card">
+                    <h4>Container Security</h4>
+                    <ul>
+                        <li><strong>Alpine Base Images:</strong> Minimal attack surface</li>
+                        <li><strong>Bridge Network:</strong> Containers isolated from host</li>
+                        <li><strong>No Root User:</strong> Non-privileged container users</li>
+                        <li><strong>Health Checks:</strong> Automatic restart on failure</li>
+                        <li><strong>Environment Variables:</strong> Secrets managed via .env</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Future Enhancements -->
+        <div class="section">
+            <h3>🚀 Potential Future Enhancements</h3>
+            <div class="feature-list">
+                <div class="feature-item">
+                    <strong>Multi-Modal Support</strong><br/>
+                    Upload course syllabi, schedule screenshots for richer context
+                </div>
+                <div class="feature-item">
+                    <strong>Recommendation Engine</strong><br/>
+                    ML-based course recommendations based on past students
+                </div>
+                <div class="feature-item">
+                    <strong>Real-time Schedule Planning</strong><br/>
+                    Interactive calendar with conflict detection
+                </div>
+                <div class="feature-item">
+                    <strong>Email Notifications</strong><br/>
+                    Alerts for registration deadlines, new courses
+                </div>
+                <div class="feature-item">
+                    <strong>Analytics Dashboard</strong><br/>
+                    Admin view: popular questions, system usage stats
+                </div>
+                <div class="feature-item">
+                    <strong>Voice Input</strong><br/>
+                    Speech-to-text for hands-free interaction
+                </div>
+                <div class="feature-item">
+                    <strong>Export Chat History</strong><br/>
+                    Download conversation as PDF for advising records
+                </div>
+                <div class="feature-item">
+                    <strong>Course Reviews Integration</strong><br/>
+                    Student feedback and ratings from rate-my-professor
+                </div>
+                <div class="feature-item">
+                    <strong>Career Path Mapping</strong><br/>
+                    Link courses to job roles and skills
+                </div>
+                <div class="feature-item">
+                    <strong>Multi-Language Support</strong><br/>
+                    i18n for international students
+                </div>
+                <div class="feature-item">
+                    <strong>PostgreSQL Migration</strong><br/>
+                    Scale beyond SQLite for production deployment
+                </div>
+                <div class="feature-item">
+                    <strong>Redis Cluster</strong><br/>
+                    High-availability cache with replication
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #e0e0e0; color: #7f8c8d;">
+            <p><strong>WPI Business School AI Adviser</strong> - Academic Advising Chatbot System</p>
+            <p>Complete System Design Documentation | Generated: 2025-12-10</p>
+        </div>
+    </div>
+</body>
+</html>

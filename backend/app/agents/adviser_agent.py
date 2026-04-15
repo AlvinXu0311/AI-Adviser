@@ -79,10 +79,10 @@ class AdviserAgent:
             raise ValueError("GOOGLE_API_KEY environment variable is required")
 
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-pro",
+            model="gemini-2.5-flash",
             temperature=0.3,  # Lower temperature for more consistent output format
             max_output_tokens=2048,
-            google_api_key=api_key,
+            api_key=api_key,
             streaming=True
         )
 

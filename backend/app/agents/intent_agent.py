@@ -56,7 +56,7 @@ class IntentAgent:
             model="gemini-2.5-flash",
             temperature=0,
             max_output_tokens=256,
-            google_api_key=api_key,
+            api_key=api_key,
         )
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", INTENT_PROMPT),

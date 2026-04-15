@@ -29,7 +29,7 @@ class ChatChain:
             model="gemini-2.5-flash",
             temperature=0.7,
             max_output_tokens=2048,
-            google_api_key=api_key
+            api_key=api_key
         )
 
         self.thinking_enabled = True
