@@ -154,7 +154,9 @@ backend/app/rules/data/*.json
 database/backups/*.sql
 database/backups/*.dump
 
-.claude/
+# Local Claude Code settings stay private; project skills are shared
+.claude/*
+!.claude/skills/
 .venv/
 frontend/.vscode
 .python-version

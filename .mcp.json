@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "wpi-adviser": {
+      "command": "uv",
+      "args": [
+        "run", "--quiet", "--no-project",
+        "--directory", "backend",
+        "--python", "3.12",
+        "--with-requirements", "mcp_server/requirements.txt",
+        "python", "-m", "mcp_server.server"
+      ]
+    }
+  }
+}

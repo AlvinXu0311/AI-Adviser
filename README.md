@@ -79,6 +79,42 @@ Query → DB Search (SQLite) → Found? → Return
 - **Score Boosting**: Exact course code matches get +0.5 relevance boost
 - **Smart Retry**: Query variations (e.g., "MA 571" → "Financial Mathematics")
 
+### MCP Server & Agent Skills
+
+The same retrieval layer the ReAct agent uses (`backend/app/services/search_service.py`)
+is also published as a [Model Context Protocol](https://modelcontextprotocol.io) server,
+so any MCP client (Claude Code, Claude Desktop, Cursor, Dify) can query WPI program data.
+
+| MCP tool | Purpose |
+|------|---------|
+| `search_courses` | Course lookup by code, topic, or instructor (DB → PDF catalog) |
+| `get_course` | Structured database record for one course code |
+| `search_programs` | Program requirements and specialties (DB → PDF catalog) |
+| `get_program_structure` | Required / optional specialties and their courses |
+| `check_degree_progress` | Audit a list of course codes against a program — stateless, no session needed |
+| `search_catalog` / `get_catalog_context` | Semantic search over the PDF catalogs |
+
+Resource: `adviser://programs` lists every program in the database. All tools are read-only.
+
+Two **Agent Skills** in `.claude/skills/` package multi-step advising workflows on top of these tools:
+
+- **`graduation-audit`** — resolve the program, normalize course codes, run the audit,
+  look up every missing course, self-check that every claim came from a tool, and
+  report in a fixed table format.
+- **`course-planning`** — audit first, choose optional specialties, gather prerequisites
+  and offering periods, schedule term by term, then verify the plan (prerequisite order,
+  no invented or duplicate courses, all requirements covered) before answering.
+
+Open the repo in Claude Code and both are picked up automatically (`.mcp.json` +
+`.claude/skills/`). To run the server yourself:
+
+```bash
+cd backend
+pip install -r mcp_server/requirements.txt   # separate from requirements.txt: mcp 2.x needs a newer starlette
+python -m mcp_server.server                                         # stdio
+python -m mcp_server.server --transport streamable-http --port 8765  # http://127.0.0.1:8765/mcp
+```
+
 ## Tech Stack
 
 ### Frontend

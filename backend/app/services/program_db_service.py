@@ -37,10 +37,10 @@ class ProgramDatabaseService:
         # Map abbreviations/terms to database-matching search patterns
         # Key: trigger patterns, Value: search terms that match DB content
         program_patterns = {
-            # MBA programs
-            ("MBA", "mba", "business administration"): ["MBA", "Business Administration"],
-            # MSBA / Analytics
-            ("MSBA", "msba", "business analytics", "analytics"): ["Analytics", "Business Analytics"],
+            # MBA programs (most specific term first: "MBA" alone only matches "MBA in Analytics")
+            ("MBA", "mba", "business administration"): ["Master of Business Administration", "MBA"],
+            # MSBA / Analytics ("Analytics" alone also matches MBA in Analytics and OSCA)
+            ("MSBA", "msba", "business analytics", "analytics"): ["Business Analytics", "Analytics"],
             # MSIT / Information Technology
             ("MSIT", "msit", "information technology"): ["Information Technology"],
             # FinTech
@@ -63,7 +63,7 @@ class ProgramDatabaseService:
                      'course', 'courses', 'specialization', 'specializations')]
             keywords.extend(words[:2])  # Take first 2 significant words
 
-        return list(set(keywords))  # Remove duplicates
+        return list(dict.fromkeys(keywords))  # Remove duplicates, keep priority order
 
     def get_all_programs(self) -> List[Dict[str, Any]]:
         """Get list of all programs with basic info."""
@@ -653,9 +653,14 @@ class ProgramDatabaseService:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             
-            # Extract keywords and search for program
-            keywords = self._extract_program_keywords(program_name)
-            
+            # Try a multi-word name as-is first (e.g. "MBA in Analytics"); single
+            # abbreviations ("MBA", "MSBA") go straight to the keyword mapping.
+            # When a pattern matches several programs, the shortest name is the
+            # closest match ("Master of Business Administration" over
+            # "MBA in Analytics : Master of Business Administration").
+            name = program_name.strip()
+            keywords = ([name] if len(name.split()) > 1 else []) + self._extract_program_keywords(name)
+
             programs = []
             for keyword in keywords:
                 pattern = f"%{keyword}%"
@@ -664,6 +669,7 @@ class ProgramDatabaseService:
                     SELECT id, program_name, program_requirements
                     FROM programs
                     WHERE program_name LIKE ?
+                    ORDER BY LENGTH(program_name)
                     LIMIT 1
                     """,
                     (pattern,),

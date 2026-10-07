@@ -1,0 +1,12 @@
+# Dependencies for the standalone MCP server (python -m mcp_server.server).
+# Kept separate from backend/requirements.txt: mcp 2.x needs starlette>=0.49,
+# which conflicts with the backend's pinned fastapi==0.111.0.
+mcp>=2.3,<3
+python-dotenv==1.0.1
+pydantic>=2.8
+
+# Vector catalog search (search_courses / search_catalog / get_catalog_context)
+chromadb==1.3.5
+PyMuPDF>=1.24.0
+langchain-google-genai
+sentence-transformers==2.7.0
