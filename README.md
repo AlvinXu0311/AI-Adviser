@@ -14,6 +14,20 @@ Interactive chatbot platform for academic advising with PDF transcript upload, *
 | **Session Isolation** | Redis + Context Managers | Per-session memory with TTL expiration and LRU eviction |
 | **Conversational AI** | Prompt Engineering | Asks clarifying questions before making assumptions |
 
+## Screenshots
+
+| Sign in (demo mode) | Chat home with live system status |
+|---|---|
+| ![Login page](docs/screenshots/login.png) | ![Chat home](docs/screenshots/chat-home.png) |
+
+| Agent reasoning in progress | Streamed answer with program details |
+|---|---|
+| ![Agent thinking](docs/screenshots/agent-thinking.png) | ![Chat answer](docs/screenshots/chat-answer.png) |
+
+**API documentation** (FastAPI Swagger UI at `http://localhost:8000/docs`):
+
+![API docs](docs/screenshots/api-docs.png)
+
 ## Architecture Highlights
 
 ### ReAct (Reasoning + Acting) Framework
