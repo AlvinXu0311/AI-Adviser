@@ -20,7 +20,7 @@ Interactive chatbot platform for academic advising with PDF transcript upload, *
 |---|---|
 | ![Login page](docs/screenshots/login.png) | ![Chat home](docs/screenshots/chat-home.png) |
 
-| Agent reasoning in progress | Streamed answer with program details |
+| Live agent process: thoughts + tool calls | Streamed answer, process collapsed when done |
 |---|---|
 | ![Agent thinking](docs/screenshots/agent-thinking.png) | ![Chat answer](docs/screenshots/chat-answer.png) |
 

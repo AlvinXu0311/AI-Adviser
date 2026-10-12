@@ -26,6 +26,12 @@ export interface Citation {
   url?: string;
 }
 
+// One entry in the agent's visible reasoning trace
+export type AgentStep =
+  | { kind: 'stage'; text: string }
+  | { kind: 'thought'; text: string }
+  | { kind: 'tool'; tool: string; input: string; output?: string; status: 'running' | 'done' };
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -33,7 +39,7 @@ export interface Message {
   timestamp: Date;
   citations?: Citation[];
   // For showing agent thought process
-  thoughtSteps?: string[]; 
+  agentSteps?: AgentStep[];
 }
 
 export interface ChatState {

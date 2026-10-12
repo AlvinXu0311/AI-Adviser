@@ -2,16 +2,20 @@ import { FC } from 'react';
 import { Message, Role } from '../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Bot, User } from 'lucide-react';
+import { AgentProcess } from './AgentProcess';
 import { motion } from 'framer-motion';
 
 interface MessageBubbleProps {
   message: Message;
   isLast: boolean;
+  isStreaming?: boolean;
 }
 
-export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
+export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast, isStreaming = false }) => {
   const isUser = message.role === Role.USER;
+  const hasSteps = !isUser && !!message.agentSteps && message.agentSteps.length > 0;
+  const hasContent = message.content.trim().length > 0;
 
   return (
     <motion.div 
@@ -43,7 +47,15 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
               : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
             }
           `}>
+             {/* Agent reasoning trace (thoughts + tool calls), shown above the answer */}
+             {hasSteps && (
+               <div className={hasContent ? 'mb-3' : ''}>
+                 <AgentProcess steps={message.agentSteps!} isStreaming={isStreaming} />
+               </div>
+             )}
+
              {/* Render Markdown Content */}
+             {(hasContent || !hasSteps) && (
              <div className={`markdown-body ${isUser ? 'text-white' : 'text-gray-800'}`}>
                 {/* Use a simplified renderer or standard styling */}
                 <ReactMarkdown 
@@ -88,24 +100,8 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast }) => {
                   {message.content}
                 </ReactMarkdown>
              </div>
-
-             {/* Thought Steps (Agentic View) - Only for Assistant */}
-             {!isUser && message.thoughtSteps && message.thoughtSteps.length > 0 && (
-               <div className="mt-4 pt-4 border-t border-gray-100">
-                  <p className="text-sm text-gray-400 font-semibold mb-2 uppercase tracking-wider flex items-center">
-                    <CheckCircle2 size={16} className="mr-2 text-green-500" /> 
-                    Agent Process
-                  </p>
-                  <div className="space-y-2">
-                    {message.thoughtSteps.map((step, idx) => (
-                      <div key={idx} className="flex items-center text-sm text-gray-500 font-mono bg-gray-50 px-3 py-2 rounded">
-                        <ArrowRight size={14} className="mr-2 text-gray-300" />
-                        {step}
-                      </div>
-                    ))}
-                  </div>
-               </div>
              )}
+
           </div>
 
           {/* Citations hidden by default - only shown if user explicitly asks for sources */}

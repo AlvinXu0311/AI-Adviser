@@ -1,5 +1,5 @@
 import { useRef, useEffect, FC, Dispatch, SetStateAction } from 'react';
-import { Message, ChatState, AgentStatus, Role } from '../types';
+import { Message, ChatState, AgentStatus, AgentStep, Role } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { InputArea } from './InputArea';
 import { SAMPLE_QUESTIONS } from '../constants';
@@ -56,15 +56,28 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
     }));
   };
 
-  const appendThoughtStep = (messageId: string, step: string) => {
+  const updateAgentSteps = (messageId: string, update: (steps: AgentStep[]) => AgentStep[]) => {
     setChatState(prev => ({
       ...prev,
       messages: prev.messages.map(msg =>
         msg.id === messageId
-          ? { ...msg, thoughtSteps: [...(msg.thoughtSteps || []), step] }
+          ? { ...msg, agentSteps: update(msg.agentSteps || []) }
           : msg
       )
     }));
+  };
+
+  const appendAgentStep = (messageId: string, step: AgentStep) => {
+    updateAgentSteps(messageId, steps => [...steps, step]);
+  };
+
+  // Attach a tool's output to the most recent running call of that tool
+  const completeToolStep = (messageId: string, output: string) => {
+    updateAgentSteps(messageId, steps => {
+      const idx = steps.map(s => s.kind === 'tool' && s.status === 'running').lastIndexOf(true);
+      if (idx === -1) return steps;
+      return steps.map((s, i) => (i === idx && s.kind === 'tool' ? { ...s, output, status: 'done' } : s));
+    });
   };
 
   const handleSendMessage = async (text: string) => {
@@ -81,7 +94,7 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
       role: Role.ASSISTANT,
       content: '',
       timestamp: new Date(),
-      thoughtSteps: []
+      agentSteps: []
     };
 
     setChatState(prev => ({
@@ -106,32 +119,30 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
             accumulated += token;
             upsertAssistantMessage(assistantMsgId, accumulated);
             setAgentStatus(AgentStatus.GENERATING);
+          } else if (event.type === 'stage') {
+            const text = event.data?.content;
+            if (text) appendAgentStep(assistantMsgId, { kind: 'stage', text });
           } else if (event.type === 'agent_action') {
-            const actionLog = event.data?.action?.log;
-            if (actionLog) {
-              appendThoughtStep(assistantMsgId, actionLog);
-            }
+            const thought = event.data?.thought;
+            if (thought) appendAgentStep(assistantMsgId, { kind: 'thought', text: thought });
             const status = mapEventToStatus(event.type);
             if (status) setAgentStatus(status);
           } else if (event.type === 'tool_start') {
-            const tool = event.data?.tool_name || 'Tool';
-            appendThoughtStep(assistantMsgId, `Tool started: ${tool}`);
+            appendAgentStep(assistantMsgId, {
+              kind: 'tool',
+              tool: event.data?.tool_name || 'tool',
+              input: event.data?.input || '',
+              status: 'running'
+            });
             const status = mapEventToStatus(event.type);
             if (status) setAgentStatus(status);
           } else if (event.type === 'tool_end') {
-            const output = event.data?.output;
-            if (output) {
-              appendThoughtStep(assistantMsgId, `Tool result: ${output}`);
-            }
+            completeToolStep(assistantMsgId, event.data?.output || '');
             const status = mapEventToStatus(event.type);
             if (status) setAgentStatus(status);
           } else if (event.type === 'agent_finish') {
-            const finalText =
-              event.data?.finish?.return_values?.output ||
-              event.data?.finish?.return_values?.response ||
-              accumulated;
-            accumulated = finalText;
-            upsertAssistantMessage(assistantMsgId, finalText);
+            const thought = event.data?.thought;
+            if (thought) appendAgentStep(assistantMsgId, { kind: 'thought', text: thought });
           } else if (event.type === 'final') {
             // Handle final response from intent pipeline
             const finalContent = event.data?.content || accumulated;
@@ -230,12 +241,15 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
     <div className="flex flex-col h-full bg-[#f9fafb]">
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-        {chatState.messages.map((msg, idx) => (
-          <MessageBubble key={msg.id} message={msg} isLast={idx === chatState.messages.length - 1} />
-        ))}
-        
-        {/* Agent Status Indicator (Visualizing the "Agentic" part) */}
-        {chatState.isLoading && (
+        {chatState.messages.map((msg, idx) => {
+          const isLast = idx === chatState.messages.length - 1;
+          return (
+            <MessageBubble key={msg.id} message={msg} isLast={isLast} isStreaming={isLast && chatState.isLoading} />
+          );
+        })}
+
+        {/* Agent Status Indicator - only until the live Agent Process panel has something to show */}
+        {chatState.isLoading && !chatState.messages[chatState.messages.length - 1]?.agentSteps?.length && (
           <div className="flex justify-start animate-pulse">
             <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-none py-4 px-6 shadow-sm flex items-center space-x-4">
               <div className="w-8 h-8 border-3 border-wpi-red border-t-transparent rounded-full animate-spin"></div>
