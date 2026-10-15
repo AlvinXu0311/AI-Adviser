@@ -32,11 +32,24 @@ services:
       # LLM Configuration
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.8-flash}
+      # Provider per role: gemini (default) or qwen; LLM_PROVIDER_<ADVISER|INTENT|COMPACTION> override
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_PROVIDER_ADVISER=${LLM_PROVIDER_ADVISER:-}
+      - LLM_PROVIDER_INTENT=${LLM_PROVIDER_INTENT:-}
+      - LLM_PROVIDER_COMPACTION=${LLM_PROVIDER_COMPACTION:-}
+      # Qwen3-8B + LoRA served by vLLM (OpenAI-compatible)
+      - QWEN_BASE_URL=${QWEN_BASE_URL:-}
+      - QWEN_MODEL=${QWEN_MODEL:-adviser-lora}
+      - QWEN_API_KEY=${QWEN_API_KEY:-EMPTY}
 
       # Redis Configuration
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
+      # Chat context compaction (rolling summary of older turns)
+      - COMPACTION_TRIGGER_MESSAGES=${COMPACTION_TRIGGER_MESSAGES:-16}
+      - COMPACTION_TRIGGER_TOKENS=${COMPACTION_TRIGGER_TOKENS:-6000}
+      - COMPACTION_KEEP_RECENT=${COMPACTION_KEEP_RECENT:-6}
 
       # CORS Configuration (allow frontend access from browser)
       - ALLOW_ALL_ORIGINS=false

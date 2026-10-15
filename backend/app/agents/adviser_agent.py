@@ -1,24 +1,24 @@
 """
-Adviser agent built as a LangGraph StateGraph with native Gemini tool calling.
+Adviser agent built as a LangGraph StateGraph with native tool calling
+(Gemini by default, or the Qwen3 LoRA model; see app/llm.py).
 
 Graph:
     START → agent ⇄ tools → END
-The agent node calls Gemini with the tools bound; tools_condition routes to the
+The agent node calls the model with the tools bound; tools_condition routes to the
 ToolNode while the model keeps requesting tools, and to END once it answers.
 After MAX_TOOL_ROUNDS tool rounds the agent is called without tools so it must answer.
 """
 import json
 import logging
-import os
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from .tools import get_all_tools, business_school_db_tool
-from ..config import gemini_model
+from ..llm import get_chat_model
+from ..services.context_compaction import summary_preamble
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,11 @@ MAX_TOOL_ROUNDS = 8
 
 # Async callback that receives SSE-ready event dicts while the graph runs
 EventSink = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+class AdviserState(MessagesState):
+    """Graph state: the chat messages plus the compacted summary of older turns."""
+    summary: str
 
 
 def get_available_programs() -> List[str]:
@@ -204,18 +209,7 @@ class AdviserAgent:
 
     def __init__(self):
         """Initialize the adviser agent with tools, language model, and compiled graph"""
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
-
-        self.llm = ChatGoogleGenerativeAI(
-            model=gemini_model(),
-            temperature=0.3,
-            max_output_tokens=4096,
-            thinking_level="medium",  # "low" returns no thought summaries
-            include_thoughts=True,  # thought summaries feed the "agent process" panel in the UI
-            api_key=api_key,
-        )
+        self.llm = get_chat_model("adviser")
 
         self.tools = get_all_tools()
 
@@ -230,9 +224,9 @@ class AdviserAgent:
     def _build_graph(self):
         """Compile the agent ⇄ tools graph"""
         llm_with_tools = self.llm.bind_tools(self.tools)
-        system_message = SystemMessage(content=self.system_prompt)
 
-        async def agent(state: MessagesState) -> Dict[str, Any]:
+        async def agent(state: AdviserState) -> Dict[str, Any]:
+            system_message = SystemMessage(content=self.system_prompt + summary_preamble(state.get("summary")))
             messages = [system_message, *state["messages"]]
             if _tool_rounds_this_turn(state["messages"]) >= MAX_TOOL_ROUNDS:
                 logger.warning("Tool budget reached; forcing a final answer")
@@ -241,7 +235,7 @@ class AdviserAgent:
                 response = await llm_with_tools.ainvoke(messages)
             return {"messages": [response]}
 
-        builder = StateGraph(MessagesState)
+        builder = StateGraph(AdviserState)
         builder.add_node("agent", agent)
         builder.add_node("tools", ToolNode(self.tools))
         builder.add_edge(START, "agent")
@@ -258,6 +252,7 @@ class AdviserAgent:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         topic_id: Optional[str] = None,  # Selected advising topic: 'general' or 'course'
         on_event: Optional[EventSink] = None,
+        conversation_summary: str = "",
     ) -> Dict[str, Any]:
         """
         Process a student query by running the agent graph.
@@ -271,6 +266,7 @@ class AdviserAgent:
             topic_id: Selected advising topic
             on_event: Optional async sink for streaming events
                 (token, agent_action, tool_start, tool_end, agent_finish)
+            conversation_summary: Compacted summary of turns older than conversation_history
 
         Returns:
             Dict with response, reasoning, and tools used
@@ -294,7 +290,7 @@ class AdviserAgent:
             final_message: Optional[AIMessage] = None
             tools_used: List[str] = []
             async for mode, chunk in self.graph.astream(
-                {"messages": messages},
+                {"messages": messages, "summary": conversation_summary},
                 {"recursion_limit": 2 * MAX_TOOL_ROUNDS + 3},
                 stream_mode=["messages", "updates"],
             ):

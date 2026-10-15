@@ -8,15 +8,32 @@ from fastapi.responses import StreamingResponse
 import logging
 import asyncio
 import json
+import time
 from asyncio import create_task
 from ..schemas.chat import ChatRequest, ChatResponse
 from ..services.context_manager import get_context_manager
-from ..services.conversation_memory import get_conversation_memory, generate_session_id
+from ..services.conversation_memory import (
+    clear_session,
+    generate_session_id,
+    get_conversation_memory,
+    get_history,
+    get_session_summary,
+)
 from ..agents.adviser_agent import get_adviser_agent
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Strong references to background compaction tasks so they are not garbage-collected mid-run
+_background_tasks: set = set()
+
+
+def _compact_in_background(memory, session_id: str) -> None:
+    """Fold old turns into the Redis summary after the reply is out, off the request path."""
+    task = create_task(memory.compact_if_needed(session_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 def validate_query_basic_sanity(message: str) -> tuple[bool, str]:
@@ -63,6 +80,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         StreamingResponse with generated message, response source, and session info
     """
     logger.info(f"Streaming chat request received: '{request.message[:50]}...'")
+    started = time.perf_counter()
     
     async def stream_generator():
         queue = asyncio.Queue()
@@ -136,17 +154,19 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                         current_courses=[]
                     )
 
-                # Get conversation history for context
+                # Conversation context = compacted summary of older turns + recent turns verbatim
                 logger.debug("Getting conversation history")
-                from ..services.conversation_memory import get_history as get_conversation_history
-                conversation_history = get_conversation_history(session_id)
+                conversation_history = get_history(session_id)
+                conversation_summary = memory.get_compacted_summary(session_id)
 
                 # Step 1: Intent Classification (with conversation history for context)
                 logger.debug("Step 1: Classifying user intent")
                 await queue.put(json.dumps({"type": "stage", "content": "Understanding your question"}))
                 from ..agents.intent_agent import get_intent_agent
                 intent_agent = get_intent_agent()
-                intent_classification = await intent_agent.classify(request.message, conversation_history)
+                intent_classification = await intent_agent.classify(
+                    request.message, conversation_history, conversation_summary
+                )
                 logger.info(f"Intent detected: {intent_classification.intent} (confidence: {intent_classification.confidence}, is_academic: {intent_classification.is_academic})")
 
                 # Layer 2: Intent validation - reject non-academic or low confidence queries
@@ -192,6 +212,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     conversation_history=conversation_history,
                     topic_id=topic_id,  # Pass selected topic
                     on_event=forward_event,
+                    conversation_summary=conversation_summary,
                 )
 
                 response_text = result.get("response", "")
@@ -208,6 +229,11 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     "session_id": session_id,
                 }
                 await queue.put(json.dumps(payload))
+
+                latency_ms = (time.perf_counter() - started) * 1000
+                memory.record_latency(latency_ms)
+                logger.info(f"Chat answered in {latency_ms:.0f} ms")
+                _compact_in_background(memory, session_id)
 
             except Exception as e:
                 logger.error(f"Error in agent task: {e}", exc_info=True)
@@ -242,14 +268,13 @@ async def get_conversation_history(session_id: str):
     logger.info(f"Retrieving conversation history for session: {session_id}")
 
     try:
-        memory = get_conversation_memory()
-        history = memory.get_history(session_id)
-        summary = memory.get_session_summary(session_id)
+        history = get_history(session_id)
 
         return {
             "session_id": session_id,
             "message_count": len(history),
-            "summary": summary,
+            "summary": get_session_summary(session_id),
+            "compacted_summary": get_conversation_memory().get_compacted_summary(session_id),
             "messages": history
         }
 
@@ -272,8 +297,7 @@ async def clear_conversation_history(session_id: str):
     logger.info(f"Clearing conversation history for session: {session_id}")
 
     try:
-        memory = get_conversation_memory()
-        memory.clear_session(session_id)
+        clear_session(session_id)
 
         return {
             "status": "success",

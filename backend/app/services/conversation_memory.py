@@ -10,6 +10,8 @@ from datetime import datetime
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
+from .context_compaction import ContextCompactor, summary_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,6 +19,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_SESSION_TTL = int(os.getenv("REDIS_SESSION_TTL", 86400))  # 24 hours
 # Max messages per session to prevent unbounded growth
 MAX_MESSAGES_PER_SESSION = int(os.getenv("REDIS_MAX_MESSAGES", 100))
+# Rolling window of end-to-end /api/chat latencies
+LATENCY_KEY = "metrics:chat_latency_ms"
+LATENCY_SAMPLES = int(os.getenv("LATENCY_SAMPLES", 500))
 
 
 class RedisConversationMemory:
@@ -27,6 +32,7 @@ class RedisConversationMemory:
     
     Expiration strategies:
     - TTL: Sessions expire after REDIS_SESSION_TTL seconds (default: 24 hours)
+    - Compaction: old turns are folded into a rolling summary (see context_compaction.py)
     - Max messages: Oldest messages pruned when exceeding REDIS_MAX_MESSAGES
     """
 
@@ -96,6 +102,8 @@ class RedisConversationMemory:
             logger.error(f"Redis initialization error: {e}")
             raise
 
+        self.compactor = ContextCompactor(self.redis_client, self.session_ttl)
+
     def get_chat_history(self, session_id: str) -> Any:
         """
         Get LangChain-compatible chat history for a session.
@@ -153,20 +161,58 @@ class RedisConversationMemory:
 
     def _prune_if_needed(self, session_id: str) -> None:
         """
-        Prune oldest messages if session exceeds max_messages limit.
-        Keeps memory bounded per session.
+        Hard cap on the verbatim window, as a safety net behind compaction.
+        RedisChatMessageHistory LPUSHes, so the oldest messages sit at the tail of the list.
         """
         try:
             key = f"message_store:{session_id}"
             msg_count = self.redis_client.llen(key)
             if msg_count > self.max_messages:
-                # Remove oldest messages (from the left of the list)
-                excess = msg_count - self.max_messages
-                for _ in range(excess):
-                    self.redis_client.lpop(key)
-                logger.info(f"Pruned {excess} old messages from session {session_id}")
+                self.redis_client.ltrim(key, 0, self.max_messages - 1)
+                logger.info(f"Pruned {msg_count - self.max_messages} old messages from session {session_id}")
         except Exception as e:
             logger.warning(f"Failed to prune messages for {session_id}: {e}")
+
+    def get_compacted_summary(self, session_id: str) -> str:
+        """Rolling summary of turns that compaction trimmed from the verbatim window."""
+        try:
+            return self.compactor.get_summary(session_id)
+        except Exception as e:
+            logger.warning(f"Failed to read compacted summary for {session_id}: {e}")
+            return ""
+
+    async def compact_if_needed(self, session_id: str) -> bool:
+        """Fold old turns into the rolling summary when the window is over threshold. Never raises."""
+        try:
+            return await self.compactor.maybe_compact(session_id)
+        except Exception as e:
+            logger.warning(f"Context compaction failed for {session_id}: {e}", exc_info=True)
+            return False
+
+    def record_latency(self, latency_ms: float) -> None:
+        """Keep the last LATENCY_SAMPLES end-to-end chat latencies for /chat/memory/stats."""
+        try:
+            pipe = self.redis_client.pipeline()
+            pipe.lpush(LATENCY_KEY, round(latency_ms))
+            pipe.ltrim(LATENCY_KEY, 0, LATENCY_SAMPLES - 1)
+            pipe.execute()
+        except Exception as e:
+            logger.warning(f"Failed to record chat latency: {e}")
+
+    def latency_stats(self) -> Dict[str, Any]:
+        samples = sorted(int(v) for v in self.redis_client.lrange(LATENCY_KEY, 0, -1))
+        if not samples:
+            return {"samples": 0}
+
+        def pct(p: float) -> int:
+            return samples[min(len(samples) - 1, int(p * len(samples)))]
+
+        return {
+            "samples": len(samples),
+            "avg_ms": round(sum(samples) / len(samples)),
+            "p50_ms": pct(0.5),
+            "p95_ms": pct(0.95),
+        }
 
     def get_messages(self, session_id: str) -> List[BaseMessage]:
         """Get all messages in conversation history"""
@@ -183,6 +229,7 @@ class RedisConversationMemory:
         """Clear conversation history for a session"""
         history = self.get_chat_history(session_id)
         history.clear()
+        self.redis_client.delete(summary_key(session_id))
         logger.info(f"Cleared conversation history for session {session_id}")
 
     def get_summary(self, session_id: str) -> str:
@@ -224,6 +271,8 @@ class RedisConversationMemory:
                 "active_sessions": session_count,
                 "session_ttl_seconds": self.session_ttl,
                 "max_messages_per_session": self.max_messages,
+                "compacted_sessions": sum(1 for _ in self.redis_client.scan_iter(match="chat_summary:*")),
+                "chat_latency": self.latency_stats(),
                 "backend": "redis"
             }
         except Exception as e:

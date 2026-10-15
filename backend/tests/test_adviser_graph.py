@@ -112,3 +112,13 @@ def test_history_to_messages_drops_current_query():
 
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
     assert messages[0].content == "Tell me about MSIT"
+
+
+async def test_compacted_summary_reaches_system_prompt(monkeypatch):
+    agent, model = _make_agent(monkeypatch, [AIMessage(content="You are in MSIT.")])
+
+    await agent.answer_query("Which program am I in?", conversation_summary="- Student is in MSIT")
+
+    system_prompt = model.calls[0][0].content
+    assert "EARLIER CONVERSATION" in system_prompt
+    assert "- Student is in MSIT" in system_prompt

@@ -8,9 +8,8 @@ import os
 from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from ..config import gemini_model
+from ..llm import get_chat_model
 from ..schemas.chat import IntentClassification
 
 logger = logging.getLogger(__name__)
@@ -47,19 +46,10 @@ INTENT_PROMPT = INTENT_PROMPT_TEMPLATE
 
 
 class IntentAgent:
-    """Wraps Gemini with a constrained JSON output for intent detection."""
+    """Wraps the intent chat model (see app/llm.py) with a constrained JSON output."""
 
     def __init__(self) -> None:
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required for intent agent")
-        self.llm = ChatGoogleGenerativeAI(
-            model=gemini_model(),
-            temperature=0,
-            thinking_level="low",  # keeps classification well inside INTENT_AGENT_TIMEOUT
-            max_output_tokens=256,
-            api_key=api_key,
-        )
+        self.llm = get_chat_model("intent")
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", INTENT_PROMPT),
             ("human", "{context}Question: {question}"),
@@ -67,19 +57,23 @@ class IntentAgent:
         self.chain = self.prompt | self.llm
         self.timeout = float(os.getenv("INTENT_AGENT_TIMEOUT", "6"))
 
-    async def classify(self, message: str, conversation_history: list = None) -> IntentClassification:
+    async def classify(
+        self, message: str, conversation_history: list = None, conversation_summary: str = ""
+    ) -> IntentClassification:
         logger.info("Intent agent classifying message: %s", message[:60])
         logger.debug("Intent agent timeout setting: %s seconds", self.timeout)
         
         # Build context from conversation history
         context = ""
+        if conversation_summary:
+            context = f"[EARLIER CONVERSATION SUMMARY]:\n{conversation_summary[:1500]}\n\n"
         if conversation_history and len(conversation_history) > 0:
             context_parts = ["[CONVERSATION HISTORY - use this to understand context]:"]
             for msg in conversation_history[-6:]:  # Last 6 messages (3 turns)
                 role = msg.get('role', 'unknown').upper()
                 content = msg.get('content', '')[:150]  # Truncate
                 context_parts.append(f"{role}: {content}")
-            context = "\n".join(context_parts) + "\n\n"
+            context += "\n".join(context_parts) + "\n\n"
             logger.info(f"Intent classification with {len(conversation_history)} history messages")
         
         try:
