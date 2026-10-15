@@ -9,7 +9,6 @@ from ..schemas.transcript import (
 )
 from ..services.pdf_extraction_service import PDFExtractionService
 from ..services.context_manager import get_context_manager
-from ..utils.error_handler import handle_pdf_extraction_error
 
 router = APIRouter()
 

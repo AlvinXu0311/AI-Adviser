@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 560" role="img" aria-label="Agent design: each turn the graph receives a system message, the chat history and the student's question with transcript summary and an optional database prefetch. The agent node calls gemini-3.8-flash with seven bound tools. While the model returns tool calls, the ToolNode runs them in parallel and returns ToolMessages; four search tools go through the search service, business_school_database reads SQLite, and student_context and degree_progress read the session transcript. After eight tool rounds the agent must answer without tools. Each step is streamed to the browser as an SSE event.">
+  <style>
+    svg { --bg:#f6f7f9; --panel:#ffffff; --tint:#e9ecf1; --fg:#1a212b; --soft:#4a5464; --muted:#5f6a7a; --line:#c3cad5; --accent:#a3222e; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#11151b; --panel:#1a2029; --tint:#171c24; --fg:#e4e8ee; --soft:#b3bcc9; --muted:#97a1b0; --line:#3a4453; --accent:#e8707a; }
+    }
+    .bg { fill: var(--bg); }
+    .region { fill: var(--tint); }
+    .bx { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+    .acc { stroke: var(--accent); stroke-width: 1.6; }
+    .dash { stroke-dasharray: 5 4; }
+    .t { fill: var(--fg); font: 600 13px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .s { fill: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .m { fill: var(--fg); font: 11.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .lb { fill: var(--soft); font: 11.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .lb.a { fill: var(--accent); }
+    .rl { fill: var(--muted); font: 600 10.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .07em; }
+    .ln { stroke: var(--soft); stroke-width: 1.3; fill: none; }
+    .ln.a { stroke: var(--accent); }
+    .ah { fill: var(--soft); }
+    .ah.a { fill: var(--accent); }
+    .dia { fill: var(--accent); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+    <marker id="arra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah a"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1240" height="560"/>
+
+  <!-- Inputs -->
+  <rect class="region" x="20" y="40" width="260" height="380" rx="10"/>
+  <text class="rl" x="34" y="62">MESSAGES PER TURN</text>
+  <rect class="bx" x="36" y="80" width="228" height="62" rx="6"/>
+  <text class="t" x="150" y="100" text-anchor="middle">SystemMessage</text>
+  <text class="s" x="150" y="118" text-anchor="middle">tool guide · rules</text>
+  <text class="s" x="150" y="134" text-anchor="middle">program list from SQLite</text>
+  <rect class="bx" x="36" y="160" width="228" height="46" rx="6"/>
+  <text class="t" x="150" y="180" text-anchor="middle">chat history</text>
+  <text class="s" x="150" y="197" text-anchor="middle">last 20 turns as messages</text>
+  <rect class="bx" x="36" y="224" width="228" height="62" rx="6"/>
+  <text class="t" x="150" y="244" text-anchor="middle">HumanMessage</text>
+  <text class="s" x="150" y="262" text-anchor="middle">question · selected topic</text>
+  <text class="s" x="150" y="278" text-anchor="middle">transcript summary</text>
+  <rect class="bx dash" x="36" y="330" width="228" height="62" rx="6"/>
+  <text class="t" x="150" y="350" text-anchor="middle">DB prefetch</text>
+  <text class="s" x="150" y="368" text-anchor="middle">program / course keywords</text>
+  <text class="s" x="150" y="384" text-anchor="middle">→ business_school_database</text>
+  <line class="ln" x1="150" y1="330" x2="150" y2="288" marker-end="url(#arr)"/>
+  <text class="lb" x="158" y="314">appended</text>
+
+  <!-- Graph -->
+  <rect class="region" x="320" y="40" width="420" height="480" rx="10"/>
+  <text class="rl" x="334" y="62">LANGGRAPH · StateGraph(MessagesState)</text>
+  <line class="ln" x1="280" y1="240" x2="418" y2="240" marker-end="url(#arr)"/>
+  <text class="lb" x="350" y="232" text-anchor="middle">START</text>
+
+  <rect class="bx" x="490" y="88" width="80" height="26" rx="13"/>
+  <text class="t" x="530" y="106" text-anchor="middle">END</text>
+  <rect class="bx acc" x="420" y="200" width="220" height="80" rx="6"/>
+  <text class="t" x="530" y="224" text-anchor="middle"><tspan class="dia">◆</tspan> agent</text>
+  <text class="s" x="530" y="244" text-anchor="middle">gemini-3.8-flash</text>
+  <text class="s" x="530" y="260" text-anchor="middle">thinking medium · 7 tools bound</text>
+  <line class="ln" x1="530" y1="200" x2="530" y2="116" marker-end="url(#arr)"/>
+  <text class="lb" x="538" y="164">no tool_calls → answer</text>
+
+  <rect class="bx" x="420" y="370" width="220" height="70" rx="6"/>
+  <text class="t" x="530" y="394" text-anchor="middle">tools</text>
+  <text class="s" x="530" y="412" text-anchor="middle">ToolNode · parallel calls</text>
+  <text class="s" x="530" y="428" text-anchor="middle">errors → ToolMessage</text>
+  <line class="ln" x1="480" y1="280" x2="480" y2="368" marker-end="url(#arr)"/>
+  <text class="lb" x="472" y="328" text-anchor="end">tool_calls</text>
+  <line class="ln" x1="580" y1="370" x2="580" y2="282" marker-end="url(#arr)"/>
+  <text class="lb" x="588" y="328">ToolMessages</text>
+
+  <polyline class="ln a dash" points="640,266 672,266 672,216 642,216" marker-end="url(#arra)"/>
+  <text class="lb a" x="678" y="238">≥ 8 rounds:</text>
+  <text class="lb a" x="678" y="254">no tools</text>
+
+  <!-- Tools to data -->
+  <rect class="region" x="780" y="40" width="440" height="300" rx="10"/>
+  <text class="rl" x="794" y="62">7 TOOLS → DATA</text>
+  <polyline class="ln" points="640,405 760,405 760,125 806,125" marker-end="url(#arr)"/>
+  <line class="ln" x1="760" y1="220" x2="806" y2="220" marker-end="url(#arr)"/>
+  <line class="ln" x1="760" y1="290" x2="806" y2="290" marker-end="url(#arr)"/>
+
+  <rect class="bx" x="808" y="78" width="200" height="94" rx="6"/>
+  <text class="m" x="822" y="100">smart_course_search</text>
+  <text class="m" x="822" y="120">program_search</text>
+  <text class="m" x="822" y="140">semantic_search</text>
+  <text class="m" x="822" y="160">pdf_context</text>
+  <rect class="bx" x="1050" y="92" width="156" height="68" rx="6"/>
+  <text class="t" x="1128" y="113" text-anchor="middle">search_service</text>
+  <text class="s" x="1128" y="132" text-anchor="middle">SQLite → Chroma</text>
+  <text class="s" x="1128" y="149" text-anchor="middle">→ retry variants</text>
+  <line class="ln" x1="1008" y1="125" x2="1048" y2="125" marker-end="url(#arr)"/>
+
+  <rect class="bx" x="808" y="200" width="200" height="40" rx="6"/>
+  <text class="m" x="822" y="225">business_school_database</text>
+  <rect class="bx" x="1050" y="200" width="156" height="40" rx="6"/>
+  <text class="t" x="1128" y="225" text-anchor="middle">SQLite</text>
+  <line class="ln" x1="1008" y1="220" x2="1048" y2="220" marker-end="url(#arr)"/>
+
+  <rect class="bx" x="808" y="264" width="200" height="54" rx="6"/>
+  <text class="m" x="822" y="286">student_context</text>
+  <text class="m" x="822" y="306">degree_progress</text>
+  <rect class="bx" x="1050" y="264" width="156" height="54" rx="6"/>
+  <text class="t" x="1128" y="286" text-anchor="middle">transcript</text>
+  <text class="s" x="1128" y="304" text-anchor="middle">+ SQLite requirements</text>
+  <line class="ln" x1="1008" y1="290" x2="1048" y2="290" marker-end="url(#arr)"/>
+
+  <!-- Events -->
+  <rect class="region" x="780" y="360" width="440" height="180" rx="10"/>
+  <text class="rl" x="794" y="382">SSE EVENTS · astream(messages, updates)</text>
+  <polyline class="ln dash" points="740,470 778,470" marker-end="url(#arr)"/>
+  <text class="s" x="796" y="408">agent text chunk</text>
+  <text class="m" x="1010" y="408">token</text>
+  <text class="s" x="796" y="432">agent with tool_calls</text>
+  <text class="m" x="1010" y="432">agent_action, tool_start</text>
+  <text class="s" x="796" y="456">ToolNode result</text>
+  <text class="m" x="1010" y="456">tool_end (same id)</text>
+  <text class="s" x="796" y="480">agent without tool_calls</text>
+  <text class="m" x="1010" y="480">agent_finish</text>
+  <text class="s" x="796" y="504">graph done (chat.py)</text>
+  <text class="m" x="1010" y="504">final</text>
+  <text class="s" x="796" y="528">thought text = Gemini thought summary</text>
+
+  <text class="lb" x="20" y="452"><tspan class="dia">◆</tspan> calls the Gemini API</text>
+  <text class="lb" x="20" y="472">dashed box: only for program / course questions</text>
+</svg>

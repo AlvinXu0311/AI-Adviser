@@ -6,6 +6,7 @@ from typing import Dict
 
 from fastapi import APIRouter
 
+from ..config import gemini_model
 from ..services.pdf_vector_service import get_pdf_vector_service
 
 router = APIRouter()
@@ -58,15 +59,6 @@ def _check_vector_db() -> Dict[str, str]:
 
 def _check_gemini() -> Dict[str, str]:
     """Perform a lightweight request against Gemini to verify availability."""
-    provider = os.getenv("LLM_PROVIDER", "google").lower()
-    if provider != "google":
-        return _status_payload(
-            "gemini",
-            "Gemini",
-            "offline",
-            f"LLM provider set to '{provider}'"
-        )
-
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         return _status_payload(
@@ -76,7 +68,7 @@ def _check_gemini() -> Dict[str, str]:
             "GOOGLE_API_KEY is not configured"
         )
 
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = gemini_model()
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI

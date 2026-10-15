@@ -7,9 +7,10 @@ import logging
 import os
 from typing import List
 
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from ..config import gemini_model
 from ..schemas.chat import IntentClassification
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,9 @@ class IntentAgent:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY environment variable is required for intent agent")
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model=gemini_model(),
             temperature=0,
+            thinking_level="low",  # keeps classification well inside INTENT_AGENT_TIMEOUT
             max_output_tokens=256,
             api_key=api_key,
         )

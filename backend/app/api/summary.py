@@ -7,6 +7,8 @@ from typing import List
 import logging
 import os
 
+from ..config import gemini_model
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -50,7 +52,7 @@ def get_gemini_model():
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not configured")
         genai.configure(api_key=api_key)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        model_name = gemini_model()
         return genai.GenerativeModel(model_name)
     except Exception as e:
         logger.error(f"Failed to initialize Gemini model: {e}")

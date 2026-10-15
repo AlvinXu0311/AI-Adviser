@@ -30,9 +30,8 @@ services:
       - "8000:8000"
     environment:
       # LLM Configuration
-      - LLM_PROVIDER=google
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.8-flash}
 
       # Redis Configuration
       - REDIS_HOST=redis

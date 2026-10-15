@@ -500,7 +500,6 @@ class PDFVectorService:
         
         if course_code_match:
             dept1 = course_code_match.group(1)
-            dept2 = course_code_match.group(2)  # May be None
             extracted_number = course_code_match.group(3)
             extracted_code = f"{dept1} {extracted_number}"
             logger.info(f"Extracted course code from query: {extracted_code}")
@@ -563,38 +562,6 @@ class PDFVectorService:
         formatted_results.sort(key=lambda x: x['score'], reverse=True)
         
         return formatted_results[:top_k]
-    
-    def search_formatted(self, query: str, top_k: int = 7) -> str:
-        """
-        Search and return formatted string for agent.
-        
-        Args:
-            query: Search query
-            top_k: Number of results
-            
-        Returns:
-            Formatted search results string
-        """
-        results = self.search(query, top_k)
-        
-        if not results:
-            return f"No relevant information found in academic documents for: '{query}'"
-        
-        output = [f"Found {len(results)} relevant section(s) for '{query}':\n"]
-        
-        for i, result in enumerate(results, 1):
-            source = result['source'].replace('.pdf', '')
-            text = result['text']
-            
-            # Truncate long text
-            if len(text) > 500:
-                text = text[:500] + "..."
-            
-            output.append(f"\n**[{i}] From: {source}** (relevance: {result['score']:.2f})")
-            output.append(f"{text}")
-            output.append("")
-        
-        return "\n".join(output)
     
     def get_context_for_query(self, query: str, max_context_length: int = 4000) -> str:
         """

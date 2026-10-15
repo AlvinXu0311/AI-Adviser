@@ -104,8 +104,6 @@ export const MessageBubble: FC<MessageBubbleProps> = ({ message, isLast, isStrea
 
           </div>
 
-          {/* Citations hidden by default - only shown if user explicitly asks for sources */}
-          
           <span className={`text-xs text-gray-400 ${isUser ? 'text-right' : 'text-left'} px-1`}>
              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>

@@ -25,7 +25,7 @@ The WPI Business School AI Adviser is a full-stack web application that provides
 
 - 🔐 **Secure Authentication** - Microsoft SSO with @wpi.edu domain validation
 - 💬 **Real-time Streaming** - Server-Sent Events (SSE) for live responses
-- 🤖 **AI Agent System** - LangChain ReAct pattern with autonomous tool use
+- 🤖 **AI Agent System** - LangGraph agent ⇄ tools graph with native Gemini tool calling
 - 📄 **PDF Processing** - Transcript upload and intelligent parsing
 - 🔍 **Hybrid Search** - Database-first with RAG fallback
 - 💾 **Conversation Memory** - Redis-backed chat history (24h retention)
@@ -95,13 +95,13 @@ The WPI Business School AI Adviser is a full-stack web application that provides
 │  └────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                   AI Agent System (ReAct Pattern)                  │ │
+│  │                  AI Agent System (LangGraph)                       │ │
 │  │                                                                    │ │
 │  │  ┌──────────────────┐         ┌────────────────────────────────┐  │ │
 │  │  │  Intent Agent    │         │      Adviser Agent             │  │ │
-│  │  │  (Gemini Flash)  │────────>│      (Gemini Pro)              │  │ │
+│  │  │  (Gemini Flash)  │────────>│      (Gemini Flash)            │  │ │
 │  │  │                  │         │                                │  │ │
-│  │  │  • Classify      │         │  • ReAct Loop (max 10 iter)    │  │ │
+│  │  │  • Classify      │         │  • agent ⇄ tools (≤8 rounds)   │  │ │
 │  │  │  • Validate      │         │  • Multi-tool orchestration    │  │ │
 │  │  │  • Filter noise  │         │  • Context-aware reasoning     │  │ │
 │  │  └──────────────────┘         └────────────┬───────────────────┘  │ │
@@ -149,7 +149,7 @@ The WPI Business School AI Adviser is a full-stack web application that provides
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       EXTERNAL SERVICES                                  │
 │                                                                          │
-│  • Google Gemini API (gemini-2.5-flash, gemini-2.5-flash)                 │
+│  • Google Gemini API (gemini-3.8-flash, set by GEMINI_MODEL)             │
 │  • Google Embeddings API (embedding-001)                                │
 │  • Microsoft Azure AD B2C (OAuth 2.0 Authentication)                    │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -177,7 +177,8 @@ jsPDF 3.0              - PDF Generation
 FastAPI 0.111          - Async Web Framework
 Uvicorn 0.29           - ASGI Server
 Python 3.12            - Runtime Environment
-LangChain 0.2          - Agent Framework
+LangGraph 1.x          - Agent Framework
+LangChain Core 1.x     - Messages, tools, prompts
 LangChain Google GenAI - Gemini Integration
 Pydantic 2.8           - Data Validation
 Python-dotenv 1.0      - Environment Config
@@ -187,23 +188,20 @@ Python-multipart 0.0.9 - File Upload Support
 
 ### AI & ML
 ```
-Google Gemini 2.5-pro    - Main LLM (reasoning)
-Google Gemini 2.5-flash  - Intent Classifier (fast)
+Google Gemini 3.8-flash  - Adviser agent (thinking_level=medium)
+Google Gemini 3.8-flash  - Intent Classifier (thinking_level=low)
 Google Embeddings API    - embedding-001
 ChromaDB 1.3.5           - Vector Database
 Sentence Transformers 2.7 - Local Embeddings (fallback)
-Rank BM25 0.2.2          - Keyword Search
 PyMuPDF 1.24             - PDF Text Extraction
 ```
 
 ### Data & Storage
 ```
 SQLite 3               - Primary Database (structured data)
-SQLAlchemy 2.0         - ORM (optional)
 Redis 5.0              - Cache & Session Store
 Redis Python Client    - Redis Driver
 ChromaDB Persistent    - Vector Storage
-PostgreSQL Support     - psycopg[binary] 3.2 (optional)
 ```
 
 ### DevOps & Deployment
@@ -253,23 +251,23 @@ FastAPI Backend
 └────────────────────┬───────────────────────────────┘
                      ↓
 ┌────────────────────────────────────────────────────┐
-│ Adviser Agent (ReAct Loop)                         │
+│ Adviser Agent (LangGraph: agent ⇄ tools)           │
 │                                                    │
-│  Iteration 1-10:                                   │
-│    Thought: "I need to search for course info"     │
+│  Rounds 1-8:                                       │
+│    agent node: Gemini returns tool_calls           │
 │       ↓                                            │
-│    Action: smart_course_search                     │
+│    tools node: smart_course_search (parallel ok)   │
 │       ↓                                            │
 │    Tool Execution:                                 │
 │      1. Try DB query (SQLite)                      │
 │      2. Try RAG search (ChromaDB)                  │
 │      3. Retry with query variations                │
 │       ↓                                            │
-│    Observation: "Found course MIS 520..."          │
+│    ToolMessage: "Found course MIS 520..."          │
 │       ↓                                            │
-│    Thought: "I have enough info now"               │
+│    agent node: no tool_calls → answer              │
 │       ↓                                            │
-│    Final Answer: Generated response                │
+│    END: streamed final response                   │
 └────────────────────┬───────────────────────────────┘
                      ↓
 ┌────────────────────────────────────────────────────┐
@@ -395,7 +393,7 @@ Query: "Who teaches MIS 520?"
 
 #### Intent Agent (`intent_agent.py`)
 - **Purpose**: Classify user intent before processing
-- **Model**: Gemini 2.5-flash (fast, low-cost)
+- **Model**: Gemini 3.8-flash, thinking_level=low (fast, low-cost)
 - **Input**: User message + last 6 conversation messages
 - **Output**: `{intent, confidence, is_academic, requires_transcript, reasoning}`
 - **Timeout**: 6 seconds
@@ -409,8 +407,8 @@ Query: "Who teaches MIS 520?"
 
 #### Adviser Agent (`adviser_agent.py`)
 - **Purpose**: Main academic advising agent
-- **Model**: Gemini 2.5-pro (powerful reasoning)
-- **Pattern**: LangChain ReAct (Reasoning + Acting)
+- **Model**: Gemini 3.8-flash, thinking_level=medium (thought summaries feed the UI)
+- **Pattern**: LangGraph `StateGraph` (agent ⇄ ToolNode) with native tool calling
 - **Tools**: 7 tools available (see below)
 - **Max Iterations**: 10
 - **Features**:
@@ -620,7 +618,6 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - LLM_PROVIDER=google
     volumes:
       - ./database:/app/database
     networks:
@@ -664,7 +661,6 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_SESSION_TTL=86400
-LLM_PROVIDER=google
 LANGCHAIN_DEBUG=false
 LOG_LEVEL=INFO
 FRONTEND_URL=http://localhost:8080
@@ -852,7 +848,6 @@ AI-Adviser/
 │   │   │   ├── intent_agent.py
 │   │   │   └── tools.py
 │   │   ├── services/          # Core Services
-│   │   │   ├── llm_service.py
 │   │   │   ├── context_manager.py
 │   │   │   ├── conversation_memory.py
 │   │   │   ├── pdf_extraction_service.py
@@ -861,11 +856,9 @@ AI-Adviser/
 │   │   ├── schemas/           # Pydantic Models
 │   │   │   ├── chat.py
 │   │   │   └── transcript.py
-│   │   ├── utils/             # Utilities
-│   │   │   └── error_handler.py
 │   │   └── main.py            # FastAPI App
 │   ├── tests/                 # Unit Tests
-│   │   ├── test_llm_service.py
+│   │   ├── test_adviser_graph.py
 │   │   └── test_pdf_extraction_service.py
 │   ├── requirements.txt
 │   └── Dockerfile

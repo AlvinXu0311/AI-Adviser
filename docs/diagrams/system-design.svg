@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1250 660" role="img" aria-label="System design: the browser loads the React build from the nginx frontend container, which proxies /api to the FastAPI backend container. The chat handler runs a sanity check, loads session state, classifies intent, and hands academic questions to the LangGraph adviser, whose tools use the search service over SQLite and ChromaDB in the database volume and the in-process ContextManager. Events stream back over SSE. Redis keeps chat history. The MCP server is a separate process that reuses the search service and database.">
+  <style>
+    svg { --bg:#f6f7f9; --panel:#ffffff; --tint:#e9ecf1; --fg:#1a212b; --soft:#4a5464; --muted:#5f6a7a; --line:#c3cad5; --accent:#a3222e; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#11151b; --panel:#1a2029; --tint:#171c24; --fg:#e4e8ee; --soft:#b3bcc9; --muted:#97a1b0; --line:#3a4453; --accent:#e8707a; }
+    }
+    .bg { fill: var(--bg); }
+    .region { fill: var(--tint); }
+    .bx { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+    .acc { stroke: var(--accent); stroke-width: 1.6; }
+    .dash { stroke-dasharray: 5 4; }
+    .t { fill: var(--fg); font: 600 13px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .s { fill: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .lb { fill: var(--soft); font: 11.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .rl { fill: var(--muted); font: 600 10.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .07em; }
+    .ln { stroke: var(--soft); stroke-width: 1.3; fill: none; }
+    .ah { fill: var(--soft); }
+    .dia { fill: var(--accent); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1250" height="660"/>
+
+  <!-- Gemini -->
+  <rect class="bx acc" x="400" y="16" width="520" height="40" rx="6"/>
+  <text class="t" x="660" y="41" text-anchor="middle"><tspan class="dia">◆</tspan> Gemini API · gemini-3.8-flash · embeddings</text>
+
+  <!-- regions -->
+  <rect class="region" x="210" y="90" width="160" height="470" rx="10"/>
+  <text class="rl" x="224" y="110">FRONTEND</text>
+  <text class="s" x="224" y="126">nginx :8080</text>
+  <rect class="region" x="400" y="90" width="520" height="470" rx="10"/>
+  <text class="rl" x="414" y="110">BACKEND</text>
+  <text class="s" x="414" y="126">FastAPI :8000</text>
+  <rect class="region" x="950" y="300" width="270" height="220" rx="10"/>
+  <text class="rl" x="964" y="322">./database VOLUME</text>
+
+  <!-- Browser -->
+  <rect class="bx" x="16" y="246" width="134" height="110" rx="6"/>
+  <text class="t" x="83" y="272" text-anchor="middle">Browser</text>
+  <text class="s" x="83" y="294" text-anchor="middle">React SPA</text>
+  <text class="s" x="83" y="312" text-anchor="middle">Azure AD sign-in</text>
+  <text class="s" x="83" y="330" text-anchor="middle">agent process view</text>
+
+  <!-- Frontend -->
+  <rect class="bx" x="226" y="150" width="128" height="50" rx="6"/>
+  <text class="t" x="290" y="171" text-anchor="middle">static build</text>
+  <text class="s" x="290" y="189" text-anchor="middle">React + Vite</text>
+  <rect class="bx" x="226" y="272" width="128" height="70" rx="6"/>
+  <text class="t" x="290" y="294" text-anchor="middle">/api proxy</text>
+  <text class="s" x="290" y="312" text-anchor="middle">→ backend:8000</text>
+  <text class="s" x="290" y="329" text-anchor="middle">SSE passthrough</text>
+
+  <polyline class="ln" points="150,262 180,262 180,175 224,175" marker-end="url(#arr)"/>
+  <text class="lb" x="186" y="167">GET /</text>
+  <line class="ln" x1="150" y1="295" x2="224" y2="295" marker-end="url(#arr)"/>
+  <text class="lb" x="187" y="288" text-anchor="middle">/api/*</text>
+  <line class="ln" x1="226" y1="325" x2="152" y2="325" marker-end="url(#arr)"/>
+  <text class="lb" x="187" y="341" text-anchor="middle">SSE</text>
+
+  <!-- Chat handler column -->
+  <rect class="bx" x="420" y="140" width="180" height="36" rx="6"/>
+  <text class="t" x="510" y="163" text-anchor="middle">/api/chat · sanity check</text>
+  <line class="ln" x1="510" y1="176" x2="510" y2="194" marker-end="url(#arr)"/>
+  <rect class="bx" x="420" y="196" width="180" height="44" rx="6"/>
+  <text class="t" x="510" y="215" text-anchor="middle">load session</text>
+  <text class="s" x="510" y="232" text-anchor="middle">history · transcript</text>
+  <line class="ln" x1="510" y1="240" x2="510" y2="258" marker-end="url(#arr)"/>
+  <rect class="bx acc" x="420" y="260" width="180" height="44" rx="6"/>
+  <text class="t" x="510" y="279" text-anchor="middle"><tspan class="dia">◆</tspan> intent agent</text>
+  <text class="s" x="510" y="296" text-anchor="middle">academic? confidence</text>
+  <text class="s" x="510" y="322" text-anchor="middle">non-academic → canned reply</text>
+  <rect class="bx" x="420" y="420" width="180" height="44" rx="6"/>
+  <text class="t" x="510" y="439" text-anchor="middle">SSE event queue</text>
+  <text class="s" x="510" y="456" text-anchor="middle">asyncio.Queue</text>
+  <rect class="bx acc" x="420" y="496" width="180" height="44" rx="6"/>
+  <text class="t" x="510" y="515" text-anchor="middle"><tspan class="dia">◆</tspan> /api/transcript</text>
+  <text class="s" x="510" y="532" text-anchor="middle">PDF → ContextManager</text>
+
+  <polyline class="ln" points="354,290 385,290 385,158 418,158" marker-end="url(#arr)"/>
+  <polyline class="ln" points="260,342 260,518 418,518" marker-end="url(#arr)"/>
+  <polyline class="ln" points="420,442 320,442 320,344" marker-end="url(#arr)"/>
+  <text class="lb" x="372" y="436" text-anchor="middle">events</text>
+
+  <!-- Agent + search column -->
+  <rect class="bx acc" x="630" y="200" width="270" height="100" rx="6"/>
+  <text class="t" x="765" y="230" text-anchor="middle"><tspan class="dia">◆</tspan> LangGraph adviser</text>
+  <text class="s" x="765" y="252" text-anchor="middle">agent ⇄ tools · 7 tools</text>
+  <text class="s" x="765" y="272" text-anchor="middle">details: agent design</text>
+  <line class="ln" x1="600" y1="282" x2="628" y2="282" marker-end="url(#arr)"/>
+  <polyline class="ln" points="640,300 640,442 602,442" marker-end="url(#arr)"/>
+  <text class="lb" x="621" y="460" text-anchor="middle">events</text>
+
+  <line class="ln" x1="780" y1="300" x2="780" y2="348" marker-end="url(#arr)"/>
+  <text class="lb" x="788" y="330">search tools</text>
+  <rect class="bx" x="660" y="350" width="240" height="60" rx="6"/>
+  <text class="t" x="780" y="374" text-anchor="middle">search_service.py</text>
+  <text class="s" x="780" y="394" text-anchor="middle">DB first → RAG → retry</text>
+
+  <!-- session reads -->
+  <polyline class="ln" points="600,210 615,210 615,74 1190,74 1190,198" marker-end="url(#arr)"/>
+  <line class="ln" x1="1050" y1="74" x2="1050" y2="98" marker-end="url(#arr)"/>
+  <text class="lb" x="860" y="68" text-anchor="middle">load session reads history · transcript</text>
+
+  <!-- Data column -->
+  <rect class="bx" x="950" y="100" width="200" height="60" rx="6"/>
+  <text class="t" x="1050" y="124" text-anchor="middle">Redis :6379</text>
+  <text class="s" x="1050" y="144" text-anchor="middle">chat history · TTL 24 h</text>
+  <rect class="bx dash" x="950" y="200" width="270" height="62" rx="6"/>
+  <text class="t" x="1085" y="222" text-anchor="middle">ContextManager</text>
+  <text class="s" x="1085" y="240" text-anchor="middle">transcript per session</text>
+  <text class="s" x="1085" y="255" text-anchor="middle">in backend memory</text>
+  <line class="ln" x1="900" y1="232" x2="948" y2="232" marker-end="url(#arr)"/>
+  <text class="lb" x="924" y="224" text-anchor="middle">reads</text>
+
+  <rect class="bx" x="966" y="340" width="238" height="56" rx="6"/>
+  <text class="t" x="1085" y="362" text-anchor="middle">SQLite · bus_school.db</text>
+  <text class="s" x="1085" y="381" text-anchor="middle">programs · specialties · courses</text>
+  <rect class="bx" x="966" y="420" width="238" height="56" rx="6"/>
+  <text class="t" x="1085" y="442" text-anchor="middle">ChromaDB · vector_db_pdf</text>
+  <text class="s" x="1085" y="461" text-anchor="middle">PDF catalog chunks · 768-d</text>
+  <line class="ln" x1="900" y1="368" x2="964" y2="368" marker-end="url(#arr)"/>
+  <text class="lb" x="932" y="360" text-anchor="middle">first</text>
+  <polyline class="ln" points="900,398 930,398 930,448 964,448" marker-end="url(#arr)"/>
+  <text class="lb" x="926" y="432" text-anchor="end">fallback</text>
+
+  <!-- MCP -->
+  <rect class="bx" x="950" y="560" width="270" height="50" rx="6"/>
+  <text class="t" x="1085" y="580" text-anchor="middle">MCP server · own process</text>
+  <text class="s" x="1085" y="598" text-anchor="middle">reuses search_service</text>
+  <line class="ln" x1="1085" y1="560" x2="1085" y2="522" marker-end="url(#arr)"/>
+  <line class="ln" x1="1085" y1="636" x2="1085" y2="612" marker-end="url(#arr)"/>
+  <text class="lb" x="1085" y="652" text-anchor="middle">Claude Code · Cursor · Dify</text>
+  <text class="lb" x="16" y="652"><tspan class="dia">◆</tspan> calls the Gemini API</text>
+</svg>

@@ -122,12 +122,6 @@ class RedisConversationMemory:
             logger.error(f"Failed to create RedisChatMessageHistory: {e}")
             raise RuntimeError(f"Failed to create RedisChatMessageHistory: {e}")
 
-    def _get_in_memory_history(self, session_id: str) -> "InMemoryChatHistory":
-        """Get in-memory fallback history"""
-        if session_id not in self.in_memory_store:
-            self.in_memory_store[session_id] = []
-        return InMemoryChatHistory(session_id, self.in_memory_store[session_id])
-
     def add_user_message(self, session_id: str, message: str) -> None:
         """Add a user message to conversation history"""
         history = self.get_chat_history(session_id)
@@ -185,36 +179,6 @@ class RedisConversationMemory:
         messages = history.messages
         return messages[-n:] if messages else []
 
-    def get_context_string(self, session_id: str, n: int = 5) -> str:
-        """
-        Get recent conversation context as formatted string for LLM.
-
-        Args:
-            session_id: Session to retrieve context for
-            n: Number of recent messages to include
-
-        Returns:
-            Formatted conversation context
-        """
-        recent = self.get_recent_messages(session_id, n)
-        if not recent:
-            return "No prior conversation"
-
-        context_parts = ["Recent conversation context:"]
-        for msg in recent:
-            if isinstance(msg, HumanMessage):
-                role = "USER"
-            elif isinstance(msg, AIMessage):
-                role = "ASSISTANT"
-            else:
-                role = "OTHER"
-
-            # Truncate long messages
-            content = msg.content[:200] if msg.content else "(empty)"
-            context_parts.append(f"{role}: {content}")
-
-        return "\n".join(context_parts)
-
     def clear_history(self, session_id: str) -> None:
         """Clear conversation history for a session"""
         history = self.get_chat_history(session_id)
@@ -265,38 +229,6 @@ class RedisConversationMemory:
         except Exception as e:
             logger.error(f"Error getting Redis stats: {str(e)}")
             return {"status": "error", "error": str(e)}
-
-    def cleanup_expired_sessions(self) -> int:
-        """
-        Manually trigger cleanup of expired sessions.
-        Redis handles TTL automatically, but this can force immediate cleanup.
-        Returns: Number of sessions cleaned up
-        """
-        # Redis automatically removes expired keys, this is informational
-        try:
-            before_count = sum(1 for _ in self.redis_client.scan_iter(match="message_store:*"))
-            # Force key expiration check
-            for key in self.redis_client.scan_iter(match="message_store:*"):
-                self.redis_client.ttl(key)  # Accessing key triggers expiration check
-            after_count = sum(1 for _ in self.redis_client.scan_iter(match="message_store:*"))
-            cleaned = before_count - after_count
-            logger.info(f"Session cleanup: {cleaned} expired sessions removed")
-            return cleaned
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            return 0
-
-    def get_session_ttl_remaining(self, session_id: str) -> int:
-        """
-        Get remaining TTL for a session in seconds.
-        Returns: -2 if key doesn't exist, -1 if no TTL set, otherwise seconds remaining
-        """
-        try:
-            key = f"message_store:{session_id}"
-            return self.redis_client.ttl(key)
-        except Exception:
-            return -2
-
 
 class InMemoryChatHistory:
     """

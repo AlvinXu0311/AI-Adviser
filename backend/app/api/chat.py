@@ -1,6 +1,6 @@
 """
-API endpoints for chat functionality with LangChain agentic RAG.
-Uses ReAct agent pattern with autonomous tool use for knowledge retrieval.
+API endpoints for chat functionality with the LangGraph adviser agent.
+The agent uses native tool calling for database-first knowledge retrieval.
 Supports multi-turn conversation with memory management.
 """
 from fastapi import APIRouter, HTTPException
@@ -13,13 +13,10 @@ from ..schemas.chat import ChatRequest, ChatResponse
 from ..services.context_manager import get_context_manager
 from ..services.conversation_memory import get_conversation_memory, generate_session_id
 from ..agents.adviser_agent import get_adviser_agent
-from langchain.callbacks.base import AsyncCallbackHandler
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_adviser_agent = None
 
 
 def validate_query_basic_sanity(message: str) -> tuple[bool, str]:
@@ -45,109 +42,10 @@ def validate_query_basic_sanity(message: str) -> tuple[bool, str]:
     return True, ""
 
 
-def get_agent():
-    global _adviser_agent
-    if _adviser_agent is None:
-        _adviser_agent = get_adviser_agent()
-    return _adviser_agent
-
-
-FINAL_ANSWER_MARKER = "Final Answer:"
-
-
-def extract_thought(log: str) -> str:
-    """Pull the reasoning text out of a ReAct log ("Thought: ... Action: ..." / "... Final Answer: ...")."""
-    if not log:
-        return ""
-    text = log
-    for marker in ("\nAction:", "Action:", FINAL_ANSWER_MARKER):
-        idx = text.find(marker)
-        if idx != -1:
-            text = text[:idx]
-    text = text.strip()
-    if text.lower().startswith("thought:"):
-        text = text[len("thought:"):].strip()
-    return text
-
-
-class StreamingCallbackHandler(AsyncCallbackHandler):
-    """Custom callback handler for streaming agent output"""
-
-    def __init__(self, queue: asyncio.Queue):
-        self.queue = queue
-        # Per-LLM-call buffer, used to stream only the text after "Final Answer:"
-        self._llm_buffer = ""
-        self._in_final_answer = False
-
-    async def on_llm_start(self, serialized, prompts, **kwargs) -> None:
-        self._llm_buffer = ""
-        self._in_final_answer = False
-
-    async def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
-        self._llm_buffer = ""
-        self._in_final_answer = False
-
-    async def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """Stream the final answer token by token; Thought/Action text is sent via agent_action instead."""
-        if not token:
-            return
-        if self._in_final_answer:
-            await self.queue.put(json.dumps({"type": "token", "content": token}))
-            return
-        self._llm_buffer += token
-        idx = self._llm_buffer.find(FINAL_ANSWER_MARKER)
-        if idx != -1:
-            self._in_final_answer = True
-            remainder = self._llm_buffer[idx + len(FINAL_ANSWER_MARKER):].lstrip()
-            if remainder:
-                await self.queue.put(json.dumps({"type": "token", "content": remainder}))
-
-    async def on_agent_action(self, action, **kwargs) -> None:
-        """Called when agent takes an action (uses a tool)"""
-        logger.debug(f"Agent action: {action.tool}")
-        if action.tool == "_Exception":
-            return  # internal parsing-error recovery, not useful to the user
-        await self.queue.put(json.dumps({
-            "type": "agent_action",
-            "tool": action.tool,
-            "input": str(action.tool_input),
-            "thought": extract_thought(action.log),
-        }))
-
-    async def on_agent_finish(self, finish, **kwargs) -> None:
-        """Called when the agent produces its Final Answer"""
-        await self.queue.put(json.dumps({
-            "type": "agent_finish",
-            "thought": extract_thought(finish.log),
-        }))
-
-    async def on_tool_start(self, serialized, input_str, **kwargs) -> None:
-        """Called when a tool starts"""
-        tool_name = serialized.get("name", "unknown")
-        if tool_name == "_Exception":
-            return
-        logger.debug(f"Tool started: {tool_name}")
-        await self.queue.put(json.dumps({
-            "type": "tool_start",
-            "tool_name": tool_name,
-            "input": input_str
-        }))
-
-    async def on_tool_end(self, output, **kwargs) -> None:
-        """Called when a tool ends"""
-        if kwargs.get("name") == "_Exception":
-            return
-        logger.debug(f"Tool ended with output: {str(output)[:100]}")
-        await self.queue.put(json.dumps({
-            "type": "tool_end",
-            "output": str(output)[:500]  # Limit output length
-        }))
-
-
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> StreamingResponse:
     """
-    Process a chat message using LangChain agentic RAG with ReAct pattern and stream the response.
+    Process a chat message with the LangGraph adviser agent and stream the response.
 
     Flow:
     1. Generate or use existing session ID for conversation memory
@@ -279,8 +177,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 # Step 2: Route to RAG Agent based on intent
                 logger.debug("Step 2: Routing to RAG agent")
                 await queue.put(json.dumps({"type": "stage", "content": "Planning which sources to check"}))
-                adviser_agent = get_agent()
-                streaming_callback = StreamingCallbackHandler(queue)
+                adviser_agent = get_adviser_agent()
+
+                async def forward_event(event: dict) -> None:
+                    await queue.put(json.dumps(event))
 
                 # Call RAG agent with intent context
                 logger.debug("Step 3: Calling RAG agent with intent context")
@@ -288,10 +188,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     query=request.message,
                     context=student_context_to_use,
                     program_id="msit",  # Default program, could be parameterized
-                    callbacks=[streaming_callback],
                     session_id=session_id,
                     conversation_history=conversation_history,
-                    topic_id=topic_id  # Pass selected topic
+                    topic_id=topic_id,  # Pass selected topic
+                    on_event=forward_event,
                 )
 
                 response_text = result.get("response", "")

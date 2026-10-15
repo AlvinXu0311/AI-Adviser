@@ -1,7 +1,6 @@
 """
-Agents module for LangChain-based academic adviser system.
-Implements ReAct (Reasoning and Acting) pattern with Database-First architecture:
-- AdviserAgent: Conversational advising with tool use (database, student_context, assess_complexity)
+Agents for the academic adviser, Database-First architecture:
+- AdviserAgent: LangGraph agent ⇄ tools graph for conversational advising
 - IntentAgent: LLM-powered free-form intent classification
 """
 

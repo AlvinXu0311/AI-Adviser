@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from collections import defaultdict
 from typing import Dict, List, Any, Optional
 import logging
 import re

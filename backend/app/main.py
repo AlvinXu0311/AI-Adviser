@@ -1,6 +1,6 @@
 """
 Main FastAPI application for WPI Business School Chatbot.
-Supports multiple LLM providers (Google Gemini or Local Llama).
+Uses Google Gemini for all LLM calls.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,10 +12,10 @@ from .api.admin import router as admin_router
 from dotenv import load_dotenv
 import os
 import logging
-import langchain
+from langchain_core.globals import set_debug
 
 # Enable LangChain debug mode for troubleshooting (can be disabled with env var)
-langchain.debug = os.getenv("LANGCHAIN_DEBUG", "false").lower() == "true"
+set_debug(os.getenv("LANGCHAIN_DEBUG", "false").lower() == "true")
 
 # Configure logging - default to INFO for production, DEBUG via env var
 log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -77,26 +77,14 @@ else:
         allow_headers=["*"],
     )
 
-# Configure LLM provider
-llm_provider = os.getenv("LLM_PROVIDER", "google").lower()
-logger.info(f"Initializing with LLM_PROVIDER: {llm_provider}")
-
-if llm_provider == "google":
-    # Configure Google Gemini only if using Google provider
-    try:
-        import google.generativeai as genai
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            logger.warning("GOOGLE_API_KEY environment variable not set")
-        else:
-            genai.configure(api_key=api_key)
-            logger.info("[INFO] Google Gemini API configured")
-    except ImportError:
-        logger.warning("google.generativeai not available - using Llama provider instead")
-elif llm_provider == "llama":
-    logger.info(f"[INFO] Using Local Llama provider (Ollama at {os.getenv('LLAMA_API_URL', 'http://localhost:11434/api')})")
+# Configure the legacy google.generativeai SDK (used by transcript extraction)
+import google.generativeai as genai
+api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    logger.warning("GOOGLE_API_KEY environment variable not set")
 else:
-    logger.warning(f"Unknown LLM_PROVIDER: {llm_provider}. Using default 'google'")
+    genai.configure(api_key=api_key)
+    logger.info("[INFO] Google Gemini API configured")
 
 # Include routers
 app.include_router(chat_router, prefix="/api", tags=["chat"])

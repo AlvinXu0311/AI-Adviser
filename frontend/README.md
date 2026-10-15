@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/drive/14_b5iSx9U6adk9EX8_VmOC
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Point `VITE_BACKEND_URL` in `.env` at the backend. The frontend needs no Gemini key; every model call goes through the backend.
 3. Run the app:
    `npm run dev`

@@ -72,9 +72,11 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
   };
 
   // Attach a tool's output to the most recent running call of that tool
-  const completeToolStep = (messageId: string, output: string) => {
+  const completeToolStep = (messageId: string, output: string, toolId?: string) => {
     updateAgentSteps(messageId, steps => {
-      const idx = steps.map(s => s.kind === 'tool' && s.status === 'running').lastIndexOf(true);
+      const running = steps.map(s => s.kind === 'tool' && s.status === 'running');
+      const byId = toolId ? steps.findIndex(s => s.kind === 'tool' && s.id === toolId) : -1;
+      const idx = byId !== -1 ? byId : running.lastIndexOf(true);
       if (idx === -1) return steps;
       return steps.map((s, i) => (i === idx && s.kind === 'tool' ? { ...s, output, status: 'done' } : s));
     });
@@ -130,6 +132,7 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
           } else if (event.type === 'tool_start') {
             appendAgentStep(assistantMsgId, {
               kind: 'tool',
+              id: event.data?.id,
               tool: event.data?.tool_name || 'tool',
               input: event.data?.input || '',
               status: 'running'
@@ -137,7 +140,7 @@ export const ChatInterface: FC<ChatInterfaceProps> = ({ chatState, setChatState 
             const status = mapEventToStatus(event.type);
             if (status) setAgentStatus(status);
           } else if (event.type === 'tool_end') {
-            completeToolStep(assistantMsgId, event.data?.output || '');
+            completeToolStep(assistantMsgId, event.data?.output || '', event.data?.id);
             const status = mapEventToStatus(event.type);
             if (status) setAgentStatus(status);
           } else if (event.type === 'agent_finish') {

@@ -1,13 +1,12 @@
 """
 PDF Extraction Service for processing and extracting text from PDF transcripts.
-Supports multiple providers: Google Gemini Vision API or Local Llama model.
+Uses Gemini to read the PDF and to structure the extracted text.
 """
-import os
 import base64
 import re
 import json
-from typing import Optional
 from datetime import datetime
+from ..config import gemini_model
 from ..schemas.transcript import (
     ExtractedTranscriptData,
     CourseInfo,
@@ -19,24 +18,13 @@ class PDFExtractionService:
     """Service for extracting and parsing transcript data from PDF files"""
 
     def __init__(self):
-        """Initialize the PDF extraction service with configured provider"""
-        self.provider = os.getenv("LLM_PROVIDER", "google").lower()
-
-        if self.provider == "llama":
-            from .llama_service import get_llama_service
-            self.llm_backend = get_llama_service()
-            print(f"[INFO] [PDF Extraction] Using Llama provider")
-        elif self.provider == "google":
-            import google.generativeai as genai
-            self.llm_backend = genai.GenerativeModel('gemini-2.5-flash')
-            print(f"[INFO] [PDF Extraction] Using Google Gemini provider")
-        else:
-            raise ValueError(f"Unknown LLM_PROVIDER: {self.provider}. Use 'google' or 'llama'")
+        """Initialize the PDF extraction service with the Gemini model"""
+        import google.generativeai as genai
+        self.llm_backend = genai.GenerativeModel(gemini_model())
 
     async def extract_text_from_pdf(self, pdf_base64: str) -> str:
         """
-        Extract text from PDF using configured provider.
-        Supports Google Gemini Vision API or Local Llama model.
+        Extract text from PDF using Gemini Vision.
 
         Args:
             pdf_base64: Base64 encoded PDF file
@@ -55,35 +43,26 @@ class PDFExtractionService:
             print(f"[PDF Extraction] Decoded PDF size: {len(pdf_data) / 1024:.2f} KB")
             print(f"[PDF Extraction] Base64 input length: {len(pdf_base64)} characters")
 
-            if self.provider == "google":
-                # Use Gemini Vision to extract text from PDF
-                prompt = """
-                Please extract all text from this academic transcript PDF.
-                Return the complete text content maintaining the structure.
-                Extract student name, ID, GPA, courses taken, program information if visible.
-                """
+            # Use Gemini Vision to extract text from PDF
+            prompt = """
+            Please extract all text from this academic transcript PDF.
+            Return the complete text content maintaining the structure.
+            Extract student name, ID, GPA, courses taken, program information if visible.
+            """
 
-                print("[PDF Extraction] Calling Gemini Vision API with model: gemini-2.5-flash")
-                print(f"[PDF Extraction] Prompt: {prompt.strip()}")
+            print(f"[PDF Extraction] Calling Gemini Vision API with model: {gemini_model()}")
+            print(f"[PDF Extraction] Prompt: {prompt.strip()}")
 
-                response = self.llm_backend.generate_content([
-                    prompt,
-                    {"mime_type": "application/pdf", "data": pdf_base64}
-                ])
+            response = self.llm_backend.generate_content([
+                prompt,
+                {"mime_type": "application/pdf", "data": pdf_base64}
+            ])
 
-                if not response.text:
-                    raise ValueError("Failed to extract text from PDF")
+            if not response.text:
+                raise ValueError("Failed to extract text from PDF")
 
-                extracted_text = response.text
-                print(f"[PDF Extraction] Successfully extracted text from Gemini")
-
-            elif self.provider == "llama":
-                # Use Llama to extract text from PDF
-                print("[PDF Extraction] Calling Llama model for PDF extraction")
-                extracted_text = await self.llm_backend.extract_text_from_pdf_with_llama(pdf_base64)
-
-            else:
-                raise ValueError(f"Unknown provider: {self.provider}")
+            extracted_text = response.text
+            print(f"[PDF Extraction] Successfully extracted text from Gemini")
 
             print(f"[PDF Extraction] Extracted text length: {len(extracted_text)} characters")
             print(f"[PDF Extraction] Extracted text preview (first 500 chars):")
@@ -94,125 +73,6 @@ class PDFExtractionService:
         except Exception as e:
             print(f"[PDF Extraction] Error during extraction: {str(e)}")
             raise ValueError(f"PDF text extraction failed: {str(e)}")
-
-    def format_extracted_text_with_regex(self, raw_text: str) -> Optional[ExtractedTranscriptData]:
-        """
-        Fast regex-based extraction and formatting of transcript data.
-        Falls back to LLM if regex doesn't extract enough information.
-
-        Args:
-            raw_text: Raw extracted text from PDF
-
-        Returns:
-            Structured transcript data if successful, None if regex extraction is incomplete
-        """
-        try:
-            print("\n📍 [PDF Processing] STEP 2A: Trying fast REGEX extraction first...")
-
-            data = ExtractedTranscriptData(raw_text=raw_text)
-            extraction_confidence = 0
-
-            # Extract student name - try multiple patterns
-            name_patterns = [
-                r"(?:student\s+)?name[:\s]*([A-Za-z\s]+?)(?:\n|$)",
-                r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
-            ]
-            for pattern in name_patterns:
-                match = re.search(pattern, raw_text, re.IGNORECASE | re.MULTILINE)
-                if match:
-                    candidate = match.group(1).strip()
-                    if len(candidate.split()) >= 2 and len(candidate) > 5:
-                        data.student_name = candidate
-                        extraction_confidence += 1
-                        print(f"   [INFO] Found name: {data.student_name}")
-                        break
-
-            # Extract student ID
-            id_patterns = [
-                r"(?:student\s+)?id[:\s]*([A-Z0-9]{8,10})",
-                r"\b([0-9]{9})\b",
-                r"\b([AB]\d{8})\b"
-            ]
-            for pattern in id_patterns:
-                match = re.search(pattern, raw_text, re.IGNORECASE)
-                if match:
-                    data.student_id = match.group(1).strip()
-                    extraction_confidence += 1
-                    print(f"   [INFO] Found ID: {data.student_id}")
-                    break
-
-            # Extract GPA - multiple patterns with improved robustness
-            gpa_patterns = [
-                r"(?:cumulative\s+)?gpa[:\s]*(\d+\.?\d{0,2})",
-                r"grade\s+point\s+average[:\s]*(\d+\.?\d{0,2})",
-                r"gpa[:\s]+(\d+\.?\d{0,2})\s*(?:/|out\s+of)?\s*(?:4\.0)?",
-                r"cumulative[:\s]*(\d+\.?\d{0,2})",
-                r"overall\s+gpa[:\s]*(\d+\.?\d{0,2})",
-                r"(?:current|term)\s+gpa[:\s]*(\d+\.?\d{0,2})"
-            ]
-            for pattern in gpa_patterns:
-                match = re.search(pattern, raw_text, re.IGNORECASE | re.MULTILINE)
-                if match:
-                    try:
-                        gpa = float(match.group(1))
-                        if 0.0 <= gpa <= 4.0:
-                            data.gpa = gpa
-                            extraction_confidence += 1
-                            print(f"   [INFO] Found GPA: {data.gpa}")
-                            break
-                    except ValueError:
-                        pass
-
-            # Extract program
-            program_patterns = [
-                r"(?:program|degree)[:\s]*([^\n]+?(?:MS|BS|PhD|Master|Bachelor).*?)(?:\n|$)",
-                r"(?:MS|BS|PhD|Master|Bachelor)\s+(?:in\s+)?([A-Za-z\s]+?)(?:\s*\(|$|\n)"
-            ]
-            for pattern in program_patterns:
-                match = re.search(pattern, raw_text, re.IGNORECASE)
-                if match:
-                    program_name = match.group(1).strip()
-                    if program_name and len(program_name) > 3:
-                        data.program_info = ProgramInfo(program_name=program_name)
-                        extraction_confidence += 1
-                        print(f"   [INFO] Found program: {program_name}")
-                        break
-
-            # Extract courses - try to find course patterns
-            course_pattern = r"([A-Z]{2,4}\d{3,4})\s*[-:]?\s*([^\n]{10,50}?)\s*(\d+\.?\d*)\s*(?:credits?)?\s*([A-F][+-]?)?"
-            courses = re.findall(course_pattern, raw_text)
-            if courses:
-                data.completed_courses = []
-                for code, name, credits, grade in courses:
-                    if code.strip() and name.strip():
-                        course = CourseInfo(
-                            course_code=code.strip(),
-                            course_name=name.strip(),
-                            credits=float(credits),
-                            grade=grade.strip() if grade else None
-                        )
-                        data.completed_courses.append(course)
-                if data.completed_courses:
-                    extraction_confidence += 1
-                    print(f"   [INFO] Found {len(data.completed_courses)} courses")
-
-            # Return data only if we found enough info, otherwise fallback to LLM
-            # IMPORTANT: Courses are critical - if no courses found, use LLM
-            if extraction_confidence >= 3 and data.completed_courses:  # At least 3 key fields + courses
-                print(f"   [INFO] [REGEX] Success! Confidence: {extraction_confidence}/5 | Courses: {len(data.completed_courses)}")
-                return data
-            else:
-                missing = []
-                if extraction_confidence < 3:
-                    missing.append(f"only {extraction_confidence}/5 fields")
-                if not data.completed_courses:
-                    missing.append("no courses found")
-                print(f"   [WARNING] [REGEX] Incomplete extraction ({', '.join(missing)}). Will use LLM...")
-                return None
-
-        except Exception as e:
-            print(f"   [WARNING] [REGEX] Error during regex extraction: {str(e)}")
-            return None
 
     def format_extracted_text_with_llm(self, raw_text: str) -> ExtractedTranscriptData:
         """
@@ -313,16 +173,8 @@ Here is the COMPLETE raw transcript text to analyze:
 {raw_text}
 """
 
-            if self.provider == "google":
-                print("[LLM Formatting] Calling Gemini to format transcript data...")
-                response = self.llm_backend.generate_content(formatting_prompt)
-            elif self.provider == "llama":
-                print("[LLM Formatting] Calling Llama to format transcript data...")
-                response = self.llm_backend.format_extracted_text_with_llama(raw_text)
-                # Llama service returns ExtractedTranscriptData directly, not a response object
-                return response
-            else:
-                raise ValueError(f"Unknown provider: {self.provider}")
+            print("[LLM Formatting] Calling Gemini to format transcript data...")
+            response = self.llm_backend.generate_content(formatting_prompt)
 
             if not response.text:
                 raise ValueError("LLM returned empty response")

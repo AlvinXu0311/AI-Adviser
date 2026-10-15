@@ -1,9 +1,9 @@
 """
 Tool definitions for the academic adviser agent.
-Provides tools for RAG retrieval, context lookup, and query analysis.
+Provides tools for database-first search, RAG retrieval, and student context lookup.
 """
 from typing import List
-from langchain.tools import Tool
+from langchain_core.tools import StructuredTool
 import logging
 
 from ..services.search_service import (
@@ -17,7 +17,7 @@ from ..services.search_service import (
 logger = logging.getLogger(__name__)
 
 
-# Tool 1: Student context lookup
+# Student context lookup
 def context_lookup_tool(info_type: str = "all") -> str:
     """
     Retrieve cached student transcript information for personalized advising.
@@ -114,73 +114,6 @@ def context_lookup_tool(info_type: str = "all") -> str:
         return f"Error retrieving context: {str(e)}"
 
 
-# Tool 2: Query complexity assessment
-def complexity_assessment_tool(query: str) -> str:
-    """
-    Assess query complexity to determine optimal reasoning approach:
-    - SIMPLE: Factual lookup (course code, program name, basic requirements)
-    - MEDIUM: Moderate reasoning (course planning, comparing options, prerequisites)
-    - COMPLEX: Deep analysis (personalized path planning, multi-factor decisions)
-
-    Use this tool to understand the question before deciding on tool strategy.
-    Guides the depth of tools needed and answer complexity.
-    """
-    try:
-        complexity = _assess_complexity(query)
-        details = f"Query Complexity Assessment: {complexity.upper()}\n\nReasoning Hints:\n"
-
-        if complexity == "simple":
-            details += "- Straightforward factual lookup\n"
-            details += "- Direct answer without reasoning\n"
-            details += "- Minimal context needed\n"
-        elif complexity == "medium":
-            details += "- Requires some analysis\n"
-            details += "- May need to relate multiple pieces of information\n"
-            details += "- Consider student context if available\n"
-        else:  # complex
-            details += "- Multi-part question requiring detailed reasoning\n"
-            details += "- Compare options or explain trade-offs\n"
-            details += "- Integrate program requirements with student context\n"
-
-        return details
-
-    except Exception as e:
-        logger.error(f"Error in complexity assessment tool: {str(e)}")
-        return f"Error assessing complexity: {str(e)}"
-
-
-def _assess_complexity(query: str) -> str:
-    """Internal helper to assess query complexity"""
-    query_lower = query.lower()
-
-    complex_indicators = [
-        "explain", "why", "how does", "compare",
-        "analyze", "evaluate", "what if", "recommend",
-        "pros and cons", "best way"
-    ]
-
-    medium_indicators = [
-        "what are", "tell me", "describe", "requirements",
-        "which", "list", "show me"
-    ]
-
-    simple_indicators = [
-        "what is my", "my gpa", "my grade",
-        "when is", "true or false"
-    ]
-
-    if any(ind in query_lower for ind in simple_indicators):
-        return "simple"
-
-    if any(ind in query_lower for ind in complex_indicators):
-        return "complex"
-
-    if any(ind in query_lower for ind in medium_indicators):
-        return "medium"
-
-    return "medium" if len(query.split()) > 15 else "simple"
-
-
 def degree_progress_tool(program_name: str) -> str:
     """
     Compare student's completed courses against program requirements.
@@ -254,19 +187,13 @@ def degree_progress_tool(program_name: str) -> str:
 
 
 # Initialize tools with proper formatting
-CONTEXT_LOOKUP_TOOL = Tool(
+CONTEXT_LOOKUP_TOOL = StructuredTool.from_function(
     name="student_context",
     func=context_lookup_tool,
     description="Look up student transcript information. Input: 'gpa', 'courses', 'program', 'progress', or 'all'"
 )
 
-COMPLEXITY_ASSESSMENT_TOOL = Tool(
-    name="assess_complexity",
-    func=complexity_assessment_tool,
-    description="Assess query complexity to determine reasoning approach needed."
-)
-
-BUSINESS_SCHOOL_DB_TOOL = Tool(
+BUSINESS_SCHOOL_DB_TOOL = StructuredTool.from_function(
     name="business_school_database",
     func=business_school_db_tool,
     description=(
@@ -276,7 +203,7 @@ BUSINESS_SCHOOL_DB_TOOL = Tool(
     )
 )
 
-SMART_COURSE_SEARCH_TOOL = Tool(
+SMART_COURSE_SEARCH_TOOL = StructuredTool.from_function(
     name="smart_course_search",
     func=smart_course_search_tool,
     description=(
@@ -286,7 +213,7 @@ SMART_COURSE_SEARCH_TOOL = Tool(
     )
 )
 
-DEGREE_PROGRESS_TOOL = Tool(
+DEGREE_PROGRESS_TOOL = StructuredTool.from_function(
     name="degree_progress",
     func=degree_progress_tool,
     description=(
@@ -297,7 +224,7 @@ DEGREE_PROGRESS_TOOL = Tool(
     )
 )
 
-SEMANTIC_SEARCH_TOOL = Tool(
+SEMANTIC_SEARCH_TOOL = StructuredTool.from_function(
     name="semantic_search",
     func=semantic_search_tool,
     description=(
@@ -308,7 +235,7 @@ SEMANTIC_SEARCH_TOOL = Tool(
     )
 )
 
-PROGRAM_SEARCH_TOOL = Tool(
+PROGRAM_SEARCH_TOOL = StructuredTool.from_function(
     name="program_search",
     func=program_search_tool,
     description=(
@@ -319,7 +246,7 @@ PROGRAM_SEARCH_TOOL = Tool(
     )
 )
 
-PDF_CONTEXT_TOOL = Tool(
+PDF_CONTEXT_TOOL = StructuredTool.from_function(
     name="pdf_context",
     func=pdf_context_tool,
     description=(
@@ -331,7 +258,7 @@ PDF_CONTEXT_TOOL = Tool(
 )
 
 
-def get_all_tools() -> List[Tool]:
+def get_all_tools() -> List[StructuredTool]:
     """Get all available tools for the agent.
     
     Tool hierarchy:

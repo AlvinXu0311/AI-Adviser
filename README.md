@@ -1,12 +1,12 @@
 # WPI Business School Digital Adviser
 
-Interactive chatbot platform for academic advising with PDF transcript upload, **LangChain ReAct agents**, and **Database-First architecture**.
+Interactive chatbot platform for academic advising with PDF transcript upload, a **LangGraph tool-calling agent**, and **Database-First architecture**.
 
 ## Key Features
 
 | Feature | Technology | Description |
 |---------|------------|-------------|
-| **ReAct Agent Framework** | LangChain + Gemini 2.5 Pro | Multi-step reasoning with Thought → Action → Observation loops |
+| **LangGraph Agent** | LangGraph + Gemini 3.8 Flash | `agent ⇄ tools` state graph with native (parallel) tool calling |
 | **Database-First Architecture** | SQLite + ChromaDB | Authoritative SQL queries with semantic search fallback |
 | **Unified Search Layer** | Custom Tool Chain | DB-first → RAG fallback → Smart retry with query variations |
 | **Real-time Streaming** | SSE + FastAPI | Token-by-token response with live tool call visualization |
@@ -30,40 +30,33 @@ Interactive chatbot platform for academic advising with PDF transcript upload, *
 
 ## Architecture Highlights
 
-### ReAct (Reasoning + Acting) Framework
+### System Design
 
-The core of the Digital Adviser is a **LangChain ReAct agent** that performs multi-step reasoning:
+![System design: browser, nginx frontend, FastAPI backend, Redis, database volume, Gemini API and MCP server](docs/diagrams/system-design.svg)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    ReAct Agent Loop                              │
-│                                                                  │
-│   User Query                                                     │
-│       ↓                                                         │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │ Thought: "I need to find MSIT specialization info..."   │   │
-│   │ Action: program_search                                   │   │
-│   │ Action Input: "MSIT specializations"                     │   │
-│   └─────────────────────────────────────────────────────────┘   │
-│       ↓                                                         │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │ Observation: "MSIT offers AI, Systems Design, ..."      │   │
-│   └─────────────────────────────────────────────────────────┘   │
-│       ↓                                                         │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │ Thought: "Now I need course details for each..."        │   │
-│   │ Action: smart_course_search                              │   │
-│   │ Action Input: "MIS 587 Predictive Analytics"             │   │
-│   └─────────────────────────────────────────────────────────┘   │
-│       ↓                                                         │
-│   ... (2-9 tool calls for complex questions) ...                │
-│       ↓                                                         │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │ Thought: "I have enough information to answer."          │   │
-│   │ Final Answer: [Complete, well-organized response]        │   │
-│   └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+- **Three containers** — nginx serves the React build and proxies `/api` to FastAPI; Redis keeps
+  chat history (24 h TTL); `./database` is mounted with the SQLite database and the ChromaDB index.
+- **One request** — `/api/chat` runs a sanity check, loads the session, asks the intent agent whether
+  the question is academic, then hands it to the LangGraph adviser. Every step is pushed onto an
+  SSE queue that streams back through nginx to the browser.
+- **Transcripts** — `/api/transcript` has Gemini read the PDF and stores the result per session in
+  the in-process `ContextManager`, where the transcript tools read it.
+- **MCP server** — a separate process that reuses the same `search_service` and database
+  (see [MCP Server & Agent Skills](#mcp-server--agent-skills)).
+
+### Agent Design
+
+![Agent design: LangGraph agent and tools loop, the seven tools and their data sources, and the SSE events each step emits](docs/diagrams/agent-design.svg)
+
+The adviser is a **LangGraph `StateGraph`** ([adviser_agent.py](backend/app/agents/adviser_agent.py))
+that drives `gemini-3.8-flash` with native tool calling:
+
+- **Native tool calling** — the model returns structured `tool_calls`; there is no
+  `Thought/Action/Final Answer` text to parse, so format errors can't happen.
+- **Parallel tools** — independent lookups (e.g. MSIT *and* MSBA requirements) run in one round.
+- **Tool budget** — after 8 tool rounds the agent is called without tools and must answer.
+- **Live process view** — Gemini thought summaries and each tool call/result are streamed
+  over SSE; tool results are matched to their calls by id.
 
 ### Agent Tools
 
@@ -73,20 +66,14 @@ The core of the Digital Adviser is a **LangChain ReAct agent** that performs mul
 | `program_search` | Program requirements and specializations | Unified Search: DB → RAG → Retry |
 | `semantic_search` | General semantic search on PDF catalogs | ChromaDB with course-aware chunking |
 | `degree_progress` | Student progress vs. program requirements | Requires uploaded transcript |
-| `student_context` | Access student's uploaded transcript data | Session-scoped with Redis |
+| `student_context` | Access student's uploaded transcript data | Session-scoped, in-process `ContextManager` |
 | `business_school_database` | Direct SQL queries | SQLite (authoritative source) |
 
 ### Unified Search Strategy
 
-```
-Query → DB Search (SQLite) → Found? → Return
-                ↓ No
-        RAG Search (ChromaDB) → Found? → Return  
-                ↓ No
-        Retry with query variations (2-3 attempts)
-                ↓ Still No
-        Return "Not found" message
-```
+Every search tool goes through `search_service.py`, which tries SQLite first, falls back to
+semantic search over the PDF catalogs in ChromaDB, and retries 2-3 query variations before
+reporting that nothing was found.
 
 **Key Innovations:**
 - **Course Code Validation**: Prevents false positives (e.g., "MA 571" won't return "MIS 571")
@@ -95,7 +82,7 @@ Query → DB Search (SQLite) → Found? → Return
 
 ### MCP Server & Agent Skills
 
-The same retrieval layer the ReAct agent uses (`backend/app/services/search_service.py`)
+The same retrieval layer the LangGraph agent uses (`backend/app/services/search_service.py`)
 is also published as a [Model Context Protocol](https://modelcontextprotocol.io) server,
 so any MCP client (Claude Code, Claude Desktop, Cursor, Dify) can query WPI program data.
 
@@ -147,8 +134,8 @@ python -m mcp_server.server --transport streamable-http --port 8765  # http://12
 | Technology | Purpose |
 |------------|---------|
 | **FastAPI** | High-performance async API framework |
-| **LangChain** | ReAct agent framework with tool orchestration |
-| **Google Gemini 2.5 Pro** | LLM for reasoning and generation |
+| **LangGraph** | Agent state graph with native tool calling |
+| **Google Gemini 3.8 Flash** | LLM for reasoning, tool calling and generation |
 | **Gemini Vision API** | PDF transcript OCR and extraction |
 | **ChromaDB** | Vector database for semantic search |
 | **SQLite** | Structured program/course database |
@@ -166,7 +153,7 @@ python -m mcp_server.server --transport streamable-http --port 8765  # http://12
 ### AI/ML Architecture
 | Component | Technology | Description |
 |-----------|------------|-------------|
-| **ReAct Agent** | LangChain + Gemini | Multi-step reasoning with tool use |
+| **LangGraph Agent** | LangGraph + Gemini | Multi-step reasoning with tool use |
 | **Intent Classification** | Free-form LLM | No hardcoded categories, natural language analysis |
 | **Unified Search** | SQLite + ChromaDB | DB-first with semantic fallback |
 | **Course-Aware Chunking** | Custom Regex | 272 course chunks with metadata |
@@ -291,97 +278,6 @@ npm run dev -- --host 0.0.0.0
 - **API Documentation**: http://localhost:8000/docs
 - **API Status**: http://localhost:8000/api/status
 
-## Architecture Overview
-
-### Application Architecture
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   Frontend (React + Nginx)                       │
-│  - Chat Interface with streaming responses                       │
-│  - PDF transcript upload with Gemini Vision extraction           │
-│  - Real-time agent process visualization (tool calls, reasoning) │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Backend (FastAPI)                            │
-│                                                                  │
-│  ┌─────────────────┐    ┌──────────────────────────────────┐   │
-│  │  Intent Agent   │───▶│       Adviser Agent (ReAct)       │   │
-│  │  (Free-form LLM │    │  Multi-step reasoning with tools  │   │
-│  │   Classification)    │  - smart_course_search            │   │
-│  └─────────────────┘    │  - program_search                 │   │
-│                         │  - semantic_search                │   │
-│                         │  - degree_progress                │   │
-│                         │  - student_context                │   │
-│                         └──────────────────────────────────┘   │
-│                                      │                          │
-│                         ┌────────────┴────────────┐            │
-│                         ▼                         ▼            │
-│         ┌──────────────────┐    ┌─────────────────────┐        │
-│         │ SQLite Database  │    │ ChromaDB Vector DB  │        │
-│         │ (bus_school.db)  │    │  (PDF Catalog RAG)  │        │
-│         │  - Programs (3)  │    │  - 272 course chunks│        │
-│         │  - Specialties   │    │  - Course-aware     │        │
-│         │  - Courses (103) │    │    chunking         │        │
-│         └──────────────────┘    └─────────────────────┘        │
-│                         │                                       │
-│                         ▼                                       │
-│              ┌──────────────────────┐                          │
-│              │   Unified Search     │                          │
-│              │  DB-first → RAG      │                          │
-│              │  with retry logic    │                          │
-│              └──────────────────────┘                          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │      Redis       │
-                    │ (Session Memory) │
-                    └──────────────────┘
-```
-
-### Unified Search Architecture
-
-All search tools share a common search strategy:
-
-```
-Query → DB Search (SQLite) → Found? → Return
-                ↓ No
-        RAG Search (ChromaDB) → Found? → Return
-                ↓ No
-        Retry with query variations (2-3 attempts)
-                ↓ Still No
-        Return "Not found" message
-```
-
-**Key Features:**
-- **DB-First**: Structured SQL queries for accurate results
-- **RAG Fallback**: Semantic search on PDF catalogs when DB fails
-- **Smart Retry**: Query variations (e.g., "MA 571" → "MA" + "571" → "Financial Mathematics")
-- **Course Code Validation**: Prevents false positives (e.g., "MA 571" won't return "MIS 571")
-- **Score Boosting**: Exact course code matches get higher relevance scores
-
-### Docker Deployment Architecture
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      Docker Host                              │
-│                                                               │
-│  ┌────────────────────┐  ┌────────────────────┐             │
-│  │   frontend:80      │  │   backend:8000     │             │
-│  │  (nginx + react)   │──│  (FastAPI+Python)  │             │
-│  └────────────────────┘  └────────────────────┘             │
-│                                    │                          │
-│                          ┌─────────┴─────────┐               │
-│                          │                   │               │
-│                    ┌─────▼──────┐    ┌──────▼─────┐         │
-│                    │ redis:6379 │    │ Volumes:   │         │
-│                    │  (cache)   │    │ - vector_db│         │
-│                    └────────────┘    │ - redis_data│        │
-│                                      └────────────┘         │
-└──────────────────────────────────────────────────────────────┘
-```
-
 ## Project Structure
 
 ```
@@ -408,10 +304,9 @@ AI-Adviser/
 ├── backend/                           # FastAPI application
 │   ├── app/
 │   │   ├── agents/
-│   │   │   ├── adviser_agent.py      # ReAct agent with multi-step reasoning
+│   │   │   ├── adviser_agent.py      # LangGraph agent ⇄ tools graph
 │   │   │   ├── intent_agent.py       # Intent classification
-│   │   │   ├── tools.py              # Unified search tools (smart_course_search, program_search, etc.)
-│   │   │   └── streaming_callback.py # SSE streaming handler
+│   │   │   └── tools.py              # Unified search tools (smart_course_search, program_search, etc.)
 │   │   ├── api/
 │   │   │   ├── chat.py               # /api/chat endpoint (streaming)
 │   │   │   ├── transcript.py         # /api/extract-transcript
@@ -432,19 +327,22 @@ AI-Adviser/
 │   ├── .dockerignore                 # Docker ignore patterns
 │   └── .env.example                  # Environment template
 │
+├── docs/
+│   ├── diagrams/                     # System and agent design (SVG)
+│   └── screenshots/                  # README screenshots
+│
 ├── database/
 │   ├── database_project/
 │   │   ├── bus_school.db             # SQLite database (source of truth)
 │   │   ├── setup_database.sql        # Database schema
 │   │   └── wbs-courses.csv           # Course data
-│   └── vector_db/                    # ChromaDB persistence (Docker volume)
+│   └── vector_db_pdf/                # ChromaDB persistence (mounted into the backend)
 │       └── chroma.sqlite3            # Vector database file
 │
 ├── docker-compose.yml                # Multi-service orchestration
 ├── .env.example                      # Environment variables template
 ├── docker-deploy.sh                  # Docker deployment script (Linux/Mac)
 ├── docker-deploy.bat                 # Docker deployment script (Windows)
-├── docker-test.sh                    # Docker configuration validator
 ├── start.sh                          # Local development start script
 ├── stop.sh                           # Local development stop script
 └── README.md                         # This file
@@ -466,7 +364,7 @@ AI-Adviser/
 - **Transcript awareness** - Detects personal progress questions
 
 ### Adviser Agent (Layer 2)
-- **ReAct pattern** - Thought → Action → Observation loop
+- **LangGraph state graph** - agent ⇄ tools loop with native tool calling
 - **Multi-step reasoning** - Complex questions trigger 2-9 tool calls
 - **Unified Search** - DB-first with RAG fallback and retry logic
 - **Tool use** - Automatic tool invocation based on query type
@@ -482,9 +380,8 @@ AI-Adviser/
 | `degree_progress` | Compare student progress against program requirements | "What courses do I still need for MBA?" |
 | `student_context` | Access uploaded transcript data | "What's my GPA?", "What courses have I taken?" |
 | `business_school_database` | Direct database queries | "List all programs" |
-| `assess_complexity` | Analyze query complexity for routing | Internal routing decisions |
 
-### Multi-Step ReAct Reasoning
+### Multi-Step Reasoning
 
 For complex questions, the agent uses **multiple tools** in sequence:
 
@@ -500,9 +397,8 @@ Final Answer: Comprehensive study plan with all course descriptions
 
 **Example: "Compare MSIT and MSBA for data analytics"**
 ```
-Step 1: program_search("MSIT requirements") → Get MSIT info
-Step 2: program_search("MSBA requirements") → Get MSBA info
-Step 3: smart_course_search("data analytics courses") → Find relevant courses
+Round 1 (parallel): program_search("MSIT requirements") + program_search("MSBA requirements")
+Round 2: smart_course_search("data analytics courses") → Find relevant courses
 Final Answer: Detailed comparison with recommendations
 ```
 
@@ -579,11 +475,8 @@ Create a `.env` file in the project root (copy from `.env.example`):
 # Google API Configuration
 GOOGLE_API_KEY=your_google_api_key_here
 
-# LLM Provider (google or llama)
-LLM_PROVIDER=google
-
 # Gemini Model
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 
 # Redis Configuration
 REDIS_HOST=redis              # Use 'redis' for Docker, 'localhost' for local
@@ -733,13 +626,6 @@ cp backend/.env.example backend/.env
 - Wait 60 seconds and retry
 - Or upgrade to paid Gemini API plan
 
-### Agent Format Errors
-```
-Invalid Format: Missing 'Action:' after 'Thought:
-```
-- This is auto-handled by the agent
-- If persistent, check the prompt template in `adviser_agent.py`
-
 ## Technology Stack
 
 | Component | Technology |
@@ -748,8 +634,8 @@ Invalid Format: Missing 'Action:' after 'Thought:
 | Styling | TailwindCSS |
 | Web Server | Nginx (production) |
 | Backend | FastAPI + Python 3.12 |
-| LLM | Google Gemini 2.5 Flash/Pro |
-| Agent Framework | LangChain |
+| LLM | Google Gemini 3.8 Flash (`GEMINI_MODEL`) |
+| Agent Framework | LangGraph + LangChain Core |
 | Database | SQLite |
 | Vector Database | ChromaDB (semantic search) |
 | Embeddings | Google Embeddings API or Sentence Transformers |

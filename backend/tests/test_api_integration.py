@@ -18,40 +18,6 @@ class TestChatEndpoint:
         """Create a test client"""
         return TestClient(app)
 
-    def test_chat_endpoint_basic_message(self, client):
-        """Test chat endpoint with basic message"""
-        with patch("app.services.llm_service.LLMService.generate_response") as mock_llm:
-            mock_llm.return_value = "Test response from LLM"
-
-            response = client.post(
-                "/api/chat",
-                json={"message": "What courses should I take?"}
-            )
-
-            assert response.status_code == 200
-            assert "Test response from LLM" in response.json()["response"]
-
-    def test_chat_endpoint_with_context(self, client):
-        """Test chat endpoint with transcript context"""
-        with patch("app.services.llm_service.LLMService.generate_response") as mock_llm:
-            mock_llm.return_value = "Personalized response"
-
-            response = client.post(
-                "/api/chat",
-                json={
-                    "message": "What's next?",
-                    "transcript_context": {
-                        "student_name": "John Doe",
-                        "gpa": 3.85,
-                        "program": "MS in Business Analytics",
-                        "course_count": 6
-                    }
-                }
-            )
-
-            assert response.status_code == 200
-            assert "Personalized response" in response.json()["response"]
-
     def test_chat_endpoint_empty_message(self, client):
         """Test chat endpoint with empty message"""
         response = client.post(
@@ -92,18 +58,6 @@ class TestChatEndpoint:
         )
 
         assert response.status_code == 422
-
-    def test_chat_endpoint_api_error(self, client):
-        """Test chat endpoint when LLM API fails"""
-        with patch("app.services.llm_service.LLMService.generate_response") as mock_llm:
-            mock_llm.side_effect = Exception("API Error")
-
-            response = client.post(
-                "/api/chat",
-                json={"message": "Test message"}
-            )
-
-            assert response.status_code == 500
 
     def test_chat_endpoint_invalid_gpa(self, client):
         """Test chat endpoint with invalid GPA in context"""

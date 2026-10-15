@@ -69,32 +69,6 @@ class StudentContext:
         self.transcript_text = transcript_data.get("transcript_text")
         self.raw_data = transcript_data
     
-    def get_completed_courses(self) -> list[str]:
-        """Get list of completed course names."""
-        return [course.get("course_name", "") for course in self.courses if course.get("course_name")]
-    
-    def get_courses_by_grade(self, min_grade: str = "D") -> list[dict]:
-        """Get courses that meet minimum grade requirement."""
-        grade_order = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"]
-        min_index = grade_order.index(min_grade) if min_grade in grade_order else len(grade_order)
-        return [
-            course for course in self.courses
-            if course.get("grade") in grade_order[:min_index + 1]
-        ]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert context to dictionary for serialization."""
-        return {
-            "student_name": self.student_name,
-            "student_id": self.student_id,
-            "email": self.email,
-            "degree_program": self.degree_program,
-            "gpa": self.gpa,
-            "courses": self.courses,
-            "current_courses": self.current_courses,
-            "transcript_text": self.transcript_text
-        }
-    
     def has_transcript(self) -> bool:
         """Check if transcript data has been uploaded."""
         return bool(self.courses) or bool(self.transcript_text)
@@ -180,17 +154,6 @@ class ContextManager:
         logger.info(f"Updated student context for session {session_id[:8]}... "
                    f"Student: {context.student_name}, Courses: {len(context.courses)}")
     
-    def clear_student_context(self, session_id: str) -> None:
-        """
-        Clear student context for a session.
-        
-        Args:
-            session_id: The unique session identifier
-        """
-        if session_id in self._sessions:
-            del self._sessions[session_id]
-            logger.info(f"Cleared student context for session: {session_id[:8]}...")
-    
     def has_context(self, session_id: str) -> bool:
         """
         Check if a session has transcript data.
@@ -209,11 +172,6 @@ class ContextManager:
             return False
         return ctx.has_transcript()
     
-    def get_session_count(self) -> int:
-        """Get number of active sessions with context."""
-        self._cleanup_expired()
-        return len(self._sessions)
-    
     def get_stats(self) -> Dict[str, Any]:
         """Get context manager statistics."""
         self._cleanup_expired()
@@ -226,11 +184,6 @@ class ContextManager:
             )
         }
     
-    def cleanup_all_expired(self) -> int:
-        """Manually trigger cleanup of all expired sessions."""
-        return self._cleanup_expired()
-
-
 # Global singleton instance
 _context_manager: Optional[ContextManager] = None
 
