@@ -1,0 +1,5 @@
+# DeepEval judge (separate venv: deepeval pins newer deps than the backend). It only reads
+# saved eval results, never imports the app.
+#   uv venv --python 3.12 .venv-eval && uv pip install --python .venv-eval/bin/python -r eval/requirements.txt
+deepeval==4.3.1
+openai>=1.40,<3

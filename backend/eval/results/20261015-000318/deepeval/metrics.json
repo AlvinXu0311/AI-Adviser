@@ -1,0 +1,41 @@
+{
+  "judge": "groq/openai/gpt-oss-120b",
+  "run": "20261015-000318",
+  "metrics": {
+    "tool_selection": {
+      "n": 102,
+      "mean": 0.912,
+      "pass_rate": 0.912,
+      "judge_errors": 0
+    },
+    "faithfulness": {
+      "n": 12,
+      "mean": 0.808,
+      "pass_rate": 0.75,
+      "judge_errors": 0
+    },
+    "answer_relevancy": {
+      "n": 15,
+      "mean": 0.796,
+      "pass_rate": 0.733,
+      "judge_errors": 0
+    },
+    "correctness": {
+      "n": 15,
+      "mean": 0.893,
+      "pass_rate": 0.867,
+      "judge_errors": 0
+    },
+    "oos_refusal": {
+      "n": 24,
+      "rate": 1.0
+    }
+  },
+  "judge_agreement": {
+    "n": 12,
+    "deepeval_mean": 0.808,
+    "gemini_judge_mean": 0.973,
+    "pearson": 0.293,
+    "fully_supported_agreement": 0.5
+  }
+}

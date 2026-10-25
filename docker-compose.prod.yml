@@ -12,6 +12,7 @@ services:
       - FRONTEND_URL=https://${DOMAIN:?Set DOMAIN, e.g. adviser.example.edu}
       - COOKIE_SECURE=true
       - ENVIRONMENT=production
+      - LANGSMITH_PROJECT=wpi-bs-production
       # Production never offers the shared demo account
       - DEMO_LOGIN_ENABLED=false
 

@@ -333,6 +333,107 @@ DEMO_USER_PASSWORD=... npm run smoke         # CSP, HttpOnly cookie, chat, trans
 DEMO_USER_PASSWORD=... npm run screenshots   # regenerates docs/screenshots/*.png
 ```
 
+## Evaluation
+
+Answer quality is measured against a gold set whose answers come from the database, so most
+checks are exact rather than an LLM's opinion. One run produces two views of the same answers:
+a **LangSmith experiment** (per-example scores and traces, comparable across runs) and a
+**DeepEval report** (LLM-judged faithfulness, relevancy and correctness, as HTML).
+
+```
+gold_set.jsonl ──upload──▶ LangSmith dataset "wpi-adviser-gold"
+                                   │
+                          live run │ (current agent, Gemini)
+                                   ▼
+                 LangSmith experiment  +  eval/results/<run>/items.jsonl
+                 (deterministic scores,          │
+                  traces, side-by-side)          ▼ deepeval_judge (free Groq judge)
+                                         <run>/deepeval/report.html
+```
+
+### Gold set
+
+327 items (`backend/eval/gold_set.jsonl`, built by `build_gold_set.py` from `bus_school.db`):
+
+| Category | Items | Checks |
+|----------|------:|--------|
+| `course_lookup`, `course_details`, `paraphrase` | 78 / 39 / 20 | instructor, credits, title, code, delivery mode, term; informal codes like `mis571` |
+| `instructor_lookup` | 20 | every course an instructor teaches |
+| `program_requirements`, `requirement_counts` | 18 / 20 | core and capstone courses; how many courses a group requires |
+| `specialty_courses` | 38 | every course option of every optional specialty |
+| `degree_audit` | 30 | remaining required courses for a synthetic transcript |
+| `prompt_injection` | 6 | transcripts with planted instructions; answers must not follow them |
+| `clarification` | 8 | program not stated; the adviser must ask instead of guessing |
+| `no_transcript`, `out_of_scope` | 10 / 40 | ask for an upload; refuse off-topic requests |
+
+Splits (usable everywhere a split is accepted):
+
+| Split | Items | Use |
+|-------|------:|-----|
+| `smoke` | 24 | 2 per category; a few minutes, after every change |
+| `dev` / `test` | 233 / 94 | 70/30 holdout grouped by course, program or specialty (no entity in both); tune on `dev`, report on `test` |
+| `v1` / `v2` | 127 / 200 | the original set / the additions (v1 is unchanged, so old runs stay comparable) |
+| `<category>` | – | one category, e.g. `degree_audit` |
+
+### One-time setup
+
+```bash
+# Keys in the repo .env: GOOGLE_API_KEY (agent), LANGSMITH_API_KEY (experiments), GROQ_API_KEY (DeepEval judge, free)
+cd backend
+uv venv --python 3.12 .venv-eval && uv pip install --python .venv-eval/bin/python -r eval/requirements.txt
+venv/bin/python -m eval.langsmith_experiments upload      # creates / updates the dataset (idempotent)
+```
+
+Re-run `build_gold_set` and `upload` only when the database or the generator changes.
+
+### Run, score, read
+
+```bash
+cd backend
+
+# 1. Run the current agent as a LangSmith experiment (also saves items.jsonl for step 2)
+venv/bin/python -m eval.langsmith_experiments live --split smoke        # or test, dev, a category; omit for all 327
+
+# 2. Score that run with DeepEval and build the HTML report
+.venv-eval/bin/python -m eval.deepeval_judge --run eval/results/<time>-<experiment> --per-category 3
+
+# 3. Open the report
+xdg-open eval/results/<time>-<experiment>/deepeval/report.html          # macOS: open
+```
+
+Then in LangSmith: **Datasets → wpi-adviser-gold → Experiments**, tick two experiments and
+**Compare** to see per-question differences with links to each trace.
+
+| Step | Cost | Time |
+|------|------|------|
+| `live --split smoke` | ~24 agent turns on Gemini | ~3 min |
+| `live` (all 327) | ~327 agent turns, roughly 2M Gemini tokens | ~15 min |
+| `deepeval_judge --per-category 3` | free (Groq); ~5K judge tokens per item | ~1 min per 1.5 items (8K tokens/min limit) |
+| `replay --run <dir>` | free: turns a saved run into an experiment | seconds |
+
+DeepEval is throttled to the free tier and resumable: if the daily quota runs out, progress is
+kept and the same command continues later. `--report-only` rebuilds the report from saved scores.
+
+### Reading the results
+
+| Score | Where | What a low value means |
+|-------|-------|------------------------|
+| `answer_correct` | LangSmith | The answer misses gold facts (e.g. a course code) or contains a forbidden string (prompt injection) |
+| `tool_selection` | both | The agent didn't use an acceptable tool (it may still have answered from the DB prefetch) |
+| `intent_gate` | LangSmith | An academic question was refused, or an off-topic one answered |
+| `correctness` | DeepEval | Facts contradict or omit the reference answer |
+| `faithfulness` | DeepEval | Claims not supported by what the tools returned: the closest signal for hallucination (not scored for `clarification` / `no_transcript`, whose right answer is a question back) |
+| `answer_relevancy` | DeepEval | Usually verbosity: extra correct detail counts as off-topic, so read before acting |
+
+In the HTML report, start with the category heatmap, then filter the explorer to that category
+with **Failing only** and click a row: it shows the question, the agent's answer, the reference
+answer and the judge's reason side by side. Where DeepEval and the run's Gemini judge disagree
+(the agreement panel), check the item by hand before trusting either score.
+
+**Offline alternative.** `venv/bin/python -m eval.run_eval [--split test]` runs the gold set
+without LangSmith, with its own Gemini judge and a Markdown report; `langsmith_experiments
+replay --run <dir>` turns such a run into an experiment afterwards.
+
 ## Project structure
 
 ```
@@ -349,6 +450,7 @@ AI-Adviser/
 │   │   └── main.py            app, body-size guard, routers
 │   ├── mcp_server/            MCP server (own requirements)
 │   ├── tests/                 pytest suite
+│   ├── eval/                  gold set, LangSmith experiments, DeepEval judge + HTML report
 │   └── requirements.txt / requirements-dev.txt
 ├── frontend/
 │   ├── components/ services/  React UI and API client (cookie session)

@@ -1,0 +1,288 @@
+{
+  "meta": {
+    "started": "2026-10-15T00:03:18",
+    "n_items": 127,
+    "gold_set": "/home/alvin/Documents/AI-Adviser/backend/eval/gold_set.jsonl",
+    "adviser_model": "gemini-3.8-flash",
+    "intent_model": "gemini-3.8-flash",
+    "judge_model": "gemini-3.8-flash",
+    "concurrency": 4,
+    "wall_clock_s": 436
+  },
+  "intent": {
+    "accuracy": 1.0,
+    "academic_class": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 102,
+      "fp": 0,
+      "fn": 0,
+      "tn": 24
+    },
+    "out_of_scope_class": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 24,
+      "fp": 0,
+      "fn": 0,
+      "tn": 102
+    },
+    "macro_f1": 1.0,
+    "n": 126
+  },
+  "retrieval": {
+    "all": {
+      "recall@5": 0.5524,
+      "recall@10": 0.6424,
+      "context_recall": 0.8709,
+      "hit@5": 0.6575,
+      "mrr": 0.5151,
+      "ndcg@5": 0.5042,
+      "n": 73
+    },
+    "course_lookup": {
+      "recall@5": 0.7692,
+      "recall@10": 0.7692,
+      "context_recall": 0.7692,
+      "hit@5": 0.7692,
+      "mrr": 0.7103,
+      "ndcg@5": 0.7251,
+      "n": 39
+    },
+    "program_requirements": {
+      "recall@5": 0.7431,
+      "recall@10": 0.7917,
+      "context_recall": 1.0,
+      "hit@5": 0.9167,
+      "mrr": 0.5342,
+      "ndcg@5": 0.6032,
+      "n": 12
+    },
+    "specialty_courses": {
+      "recall@5": 0.0639,
+      "recall@10": 0.3362,
+      "context_recall": 0.9807,
+      "hit@5": 0.3182,
+      "mrr": 0.1588,
+      "ndcg@5": 0.0587,
+      "n": 22
+    }
+  },
+  "tools": {
+    "selection_accuracy": 0.9118,
+    "agent_only_selection_accuracy": 0.5588,
+    "first_call_accuracy": 0.6078,
+    "argument_accuracy": 1.0,
+    "n": 102,
+    "n_args": 52,
+    "by_category": {
+      "course_lookup": {
+        "selection_accuracy": 0.7692,
+        "agent_only_selection_accuracy": 0.7692,
+        "argument_accuracy": 1.0,
+        "n": 39
+      },
+      "degree_audit": {
+        "selection_accuracy": 1.0,
+        "agent_only_selection_accuracy": 1.0,
+        "argument_accuracy": 1.0,
+        "n": 18
+      },
+      "no_transcript": {
+        "selection_accuracy": 1.0,
+        "agent_only_selection_accuracy": 1.0,
+        "argument_accuracy": null,
+        "n": 5
+      },
+      "program_requirements": {
+        "selection_accuracy": 1.0,
+        "agent_only_selection_accuracy": 0.2222,
+        "argument_accuracy": 1.0,
+        "n": 18
+      },
+      "specialty_courses": {
+        "selection_accuracy": 1.0,
+        "agent_only_selection_accuracy": 0.0,
+        "argument_accuracy": null,
+        "n": 22
+      }
+    }
+  },
+  "answers": {
+    "accuracy": 0.9118,
+    "n": 102,
+    "by_category": {
+      "course_lookup": {
+        "accuracy": 1.0,
+        "n": 39,
+        "code_recall": 1.0
+      },
+      "degree_audit": {
+        "accuracy": 1.0,
+        "n": 18,
+        "code_recall": 1.0
+      },
+      "no_transcript": {
+        "accuracy": 1.0,
+        "n": 5
+      },
+      "program_requirements": {
+        "accuracy": 1.0,
+        "n": 18,
+        "code_recall": 1.0
+      },
+      "specialty_courses": {
+        "accuracy": 0.5909,
+        "n": 22,
+        "code_recall": 0.8494
+      }
+    }
+  },
+  "grounding": {
+    "faithfulness": 0.9649,
+    "hallucination_rate": 0.1569,
+    "unsupported_claim_rate": 0.0436,
+    "answer_relevancy_1to5": 4.902,
+    "n": 102
+  },
+  "refusal": {
+    "refusal_rate": 1.0,
+    "refused_at_intent_gate": 1.0,
+    "n": 24,
+    "false_refusal_rate": 0.0
+  },
+  "consistency": {
+    "k": 3,
+    "n": 20,
+    "pass^k": 0.85,
+    "pass@k": 0.85,
+    "pass@1": 0.85,
+    "runs": {
+      "q000": [
+        true,
+        true,
+        true
+      ],
+      "q079": [
+        true,
+        true,
+        true
+      ],
+      "q039": [
+        true,
+        true,
+        true
+      ],
+      "q057": [
+        false,
+        false,
+        false
+      ],
+      "q001": [
+        true,
+        true,
+        true
+      ],
+      "q080": [
+        true,
+        true,
+        true
+      ],
+      "q040": [
+        true,
+        true,
+        true
+      ],
+      "q058": [
+        true,
+        true,
+        true
+      ],
+      "q002": [
+        true,
+        true,
+        true
+      ],
+      "q081": [
+        true,
+        true,
+        true
+      ],
+      "q041": [
+        true,
+        true,
+        true
+      ],
+      "q059": [
+        false,
+        false,
+        false
+      ],
+      "q003": [
+        true,
+        true,
+        true
+      ],
+      "q082": [
+        true,
+        true,
+        true
+      ],
+      "q042": [
+        true,
+        true,
+        true
+      ],
+      "q060": [
+        false,
+        false,
+        false
+      ],
+      "q004": [
+        true,
+        true,
+        true
+      ],
+      "q083": [
+        true,
+        true,
+        true
+      ],
+      "q043": [
+        true,
+        true,
+        true
+      ],
+      "q061": [
+        true,
+        true,
+        true
+      ]
+    }
+  },
+  "efficiency": {
+    "latency_ms": {
+      "avg": 7280.1415,
+      "p50": 6238.345,
+      "p95": 14417.5472,
+      "max": 38203.3465
+    },
+    "latency_ms_answered_by_agent": {
+      "avg": 8548.7055,
+      "p50": 7922.9631,
+      "p95": 14624.1603
+    },
+    "intent_latency_ms": {
+      "p50": 1738.4725,
+      "p95": 2650.1919
+    },
+    "input_tokens_per_query": 6276.8175,
+    "output_tokens_per_query": 607.2619,
+    "llm_calls_per_query": 2.9524,
+    "tool_calls_per_agent_task": 2.3529,
+    "max_tool_calls": 9
+  },
+  "errors": 1
+}

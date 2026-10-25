@@ -36,11 +36,12 @@ logger = logging.getLogger(__name__)
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # /app
-PDF_SOURCE_DIR = os.path.join(BASE_DIR, "database", "database_project")
+# Defaults match the Docker layout (/app/database); local tools point these at the repo's database/
+PDF_SOURCE_DIR = os.getenv("CATALOG_PDF_DIR", os.path.join(BASE_DIR, "database", "database_project"))
 # Index written before versioned builds existed; used read-only until a version is activated
-LEGACY_CHROMA_PATH = os.path.join(BASE_DIR, "database", "vector_db_pdf")
+LEGACY_CHROMA_PATH = os.getenv("LEGACY_VECTOR_DB_PATH", os.path.join(BASE_DIR, "database", "vector_db_pdf"))
 CHROMA_PATH = LEGACY_CHROMA_PATH  # kept for callers that print it
-INDEX_ROOT = os.path.join(BASE_DIR, "database", "vector_index")
+INDEX_ROOT = os.getenv("VECTOR_INDEX_ROOT", os.path.join(BASE_DIR, "database", "vector_index"))
 COLLECTION_NAME = "pdf_documents"
 RELOAD_CHECK_SECONDS = float(os.getenv("VECTOR_INDEX_RELOAD_SECONDS", "5"))
 
@@ -346,15 +347,22 @@ class PDFVectorService(_PdfPipeline):
     
     _instance = None
     _initialized = False
+    # Tool threads can hit the service for the first time at once; initialize exactly once
+    _init_lock = threading.Lock()
     
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
+        with cls._init_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
         return cls._instance
     
     def __init__(self):
-        if PDFVectorService._initialized:
-            return
+        with PDFVectorService._init_lock:
+            if PDFVectorService._initialized:
+                return
+            self._init_once()
+
+    def _init_once(self):
         self._lock = threading.Lock()
         self._last_check = 0.0
         self.version: Optional[str] = None
