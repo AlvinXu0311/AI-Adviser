@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 480" role="img" aria-label="Evaluation flow. Build: build_gold_set.py turns bus_school.db into gold_set.jsonl, 327 items in 12 categories with smoke, dev, test, v1 and v2 splits, uploaded to the LangSmith dataset wpi-adviser-gold. Run: a live run of the current agent on Gemini over a chosen split, or the offline run_eval.py. Score and read: the live run becomes a LangSmith experiment with deterministic scores, a trace per example and side-by-side comparison, and also saves items.jsonl; any saved items.jsonl can be replayed into an experiment without model calls. The DeepEval judge, a free Groq model, scores items.jsonl for faithfulness, relevancy and correctness and writes report.html with a category heatmap, judge agreement and failing items with reasons.">
+  <style>
+    svg { --bg:#f6f7f9; --panel:#ffffff; --tint:#e9ecf1; --fg:#1a212b; --soft:#4a5464; --muted:#5f6a7a; --line:#c3cad5; --accent:#a3222e; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#11151b; --panel:#1a2029; --tint:#171c24; --fg:#e4e8ee; --soft:#b3bcc9; --muted:#97a1b0; --line:#3a4453; --accent:#e8707a; }
+    }
+    .bg { fill: var(--bg); }
+    .region { fill: var(--tint); }
+    .bx { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+    .acc { stroke: var(--accent); stroke-width: 1.6; }
+    .dash { stroke-dasharray: 5 4; }
+    .t { fill: var(--fg); font: 600 13px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .s { fill: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .lb { fill: var(--soft); font: 11.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .rl { fill: var(--muted); font: 600 10.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: .07em; }
+    .ln { stroke: var(--soft); stroke-width: 1.3; fill: none; }
+    .ah { fill: var(--soft); }
+    .dia { fill: var(--accent); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1240" height="480"/>
+
+  <!-- Regions -->
+  <rect class="region" x="20" y="20" width="250" height="420" rx="10"/>
+  <text class="rl" x="34" y="42">1 · BUILD THE QUESTIONS</text>
+  <rect class="region" x="300" y="20" width="280" height="420" rx="10"/>
+  <text class="rl" x="314" y="42">2 · RUN THE AGENT</text>
+  <rect class="region" x="610" y="20" width="610" height="420" rx="10"/>
+  <text class="rl" x="624" y="42">3 · SCORE &amp; READ</text>
+
+  <!-- 1. Build -->
+  <rect class="bx" x="36" y="60" width="218" height="50" rx="6"/>
+  <text class="t" x="145" y="81" text-anchor="middle">bus_school.db</text>
+  <text class="s" x="145" y="99" text-anchor="middle">programs · courses · specialties</text>
+  <line class="ln" x1="145" y1="110" x2="145" y2="130" marker-end="url(#arr)"/>
+  <rect class="bx" x="36" y="132" width="218" height="50" rx="6"/>
+  <text class="t" x="145" y="153" text-anchor="middle">build_gold_set.py</text>
+  <text class="s" x="145" y="171" text-anchor="middle">answers computed with SQL</text>
+  <line class="ln" x1="145" y1="182" x2="145" y2="202" marker-end="url(#arr)"/>
+  <rect class="bx" x="36" y="204" width="218" height="104" rx="6"/>
+  <text class="t" x="145" y="226" text-anchor="middle">gold_set.jsonl</text>
+  <text class="s" x="145" y="246" text-anchor="middle">327 items · 12 categories</text>
+  <text class="s" x="145" y="266" text-anchor="middle">splits: smoke · dev · test</text>
+  <text class="s" x="145" y="283" text-anchor="middle">v1 · v2 · one per category</text>
+  <text class="s" x="145" y="300" text-anchor="middle">dev/test never share a course</text>
+  <line class="ln" x1="145" y1="308" x2="145" y2="340" marker-end="url(#arr)"/>
+  <text class="lb" x="153" y="329">upload</text>
+  <rect class="bx" x="36" y="342" width="218" height="72" rx="6"/>
+  <text class="t" x="145" y="364" text-anchor="middle">LangSmith dataset</text>
+  <text class="s" x="145" y="384" text-anchor="middle">wpi-adviser-gold</text>
+  <text class="s" x="145" y="401" text-anchor="middle">idempotent · versioned</text>
+
+  <!-- 2. Run -->
+  <polyline class="ln" points="254,378 286,378 286,120 314,120" marker-end="url(#arr)"/>
+  <text class="lb" x="282" y="250" text-anchor="middle" transform="rotate(-90 282 250)">examples of a split</text>
+  <rect class="bx acc" x="316" y="64" width="248" height="112" rx="6"/>
+  <text class="t" x="440" y="88" text-anchor="middle"><tspan class="dia">◆</tspan> live run</text>
+  <text class="s" x="440" y="110" text-anchor="middle">langsmith_experiments live</text>
+  <text class="s" x="440" y="128" text-anchor="middle">--split smoke | test | dev</text>
+  <text class="s" x="440" y="146" text-anchor="middle">current agent, real tools</text>
+  <text class="s" x="440" y="163" text-anchor="middle">smoke ~3 min · all ~15 min</text>
+  <rect class="bx dash" x="316" y="300" width="248" height="80" rx="6"/>
+  <text class="t" x="440" y="322" text-anchor="middle"><tspan class="dia">◆</tspan> run_eval.py (offline)</text>
+  <text class="s" x="440" y="342" text-anchor="middle">same questions, no LangSmith</text>
+  <text class="s" x="440" y="359" text-anchor="middle">own Gemini judge · report.md</text>
+
+  <!-- Run -> outputs -->
+  <line class="ln" x1="564" y1="110" x2="624" y2="110" marker-end="url(#arr)"/>
+  <text class="lb" x="594" y="102" text-anchor="middle">scores</text>
+  <polyline class="ln" points="564,150 594,150 594,312 624,312" marker-end="url(#arr)"/>
+  <text class="lb" x="600" y="236">answers</text>
+  <line class="ln" x1="564" y1="342" x2="624" y2="342" marker-end="url(#arr)"/>
+
+  <!-- 3. LangSmith experiment -->
+  <rect class="bx" x="626" y="60" width="280" height="168" rx="6"/>
+  <text class="t" x="766" y="84" text-anchor="middle">LangSmith experiment</text>
+  <text class="s" x="642" y="108">answer_correct · tool_selection</text>
+  <text class="s" x="642" y="127">intent_gate · latency_s</text>
+  <text class="s" x="642" y="146">accuracy per category</text>
+  <text class="s" x="642" y="170">a trace per question</text>
+  <text class="s" x="642" y="189">Compare two runs side by side</text>
+  <text class="s" x="642" y="212">web: Datasets → Experiments</text>
+
+  <!-- items.jsonl and replay -->
+  <rect class="bx" x="626" y="290" width="280" height="72" rx="6"/>
+  <text class="t" x="766" y="312" text-anchor="middle">items.jsonl</text>
+  <text class="s" x="766" y="332" text-anchor="middle">eval/results/&lt;run&gt;/</text>
+  <text class="s" x="766" y="349" text-anchor="middle">answers + tool calls + outputs</text>
+  <line class="ln dash" x1="700" y1="290" x2="700" y2="230" marker-end="url(#arr)"/>
+  <text class="lb" x="708" y="258">replay</text>
+  <text class="s" x="708" y="274">no model calls</text>
+
+  <!-- DeepEval -->
+  <line class="ln" x1="906" y1="326" x2="928" y2="326" marker-end="url(#arr)"/>
+  <rect class="bx" x="930" y="270" width="274" height="132" rx="6"/>
+  <text class="t" x="1067" y="292" text-anchor="middle">DeepEval judge</text>
+  <text class="s" x="1067" y="312" text-anchor="middle">Groq gpt-oss-120b · free</text>
+  <text class="s" x="1067" y="331" text-anchor="middle">not Gemini: no self-grading</text>
+  <text class="s" x="1067" y="352" text-anchor="middle">faithfulness · relevancy</text>
+  <text class="s" x="1067" y="369" text-anchor="middle">correctness (G-Eval)</text>
+  <text class="s" x="1067" y="388" text-anchor="middle">throttled · resumable</text>
+  <line class="ln" x1="1067" y1="270" x2="1067" y2="230" marker-end="url(#arr)"/>
+
+  <!-- Report -->
+  <rect class="bx" x="930" y="60" width="274" height="168" rx="6"/>
+  <text class="t" x="1067" y="84" text-anchor="middle">report.html</text>
+  <text class="s" x="946" y="108">score cards per metric</text>
+  <text class="s" x="946" y="127">category heatmap</text>
+  <text class="s" x="946" y="146">agreement with Gemini judge</text>
+  <text class="s" x="946" y="170">failing items: question,</text>
+  <text class="s" x="946" y="189">answer, reference, reason</text>
+  <text class="s" x="946" y="212">+ report.md · metrics.json</text>
+
+  <text class="lb" x="20" y="466"><tspan class="dia">◆</tspan> calls the Gemini API (paid) · dashed: optional / offline path</text>
+</svg>

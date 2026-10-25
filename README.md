@@ -340,16 +340,7 @@ checks are exact rather than an LLM's opinion. One run produces two views of the
 a **LangSmith experiment** (per-example scores and traces, comparable across runs) and a
 **DeepEval report** (LLM-judged faithfulness, relevancy and correctness, as HTML).
 
-```
-gold_set.jsonl ──upload──▶ LangSmith dataset "wpi-adviser-gold"
-                                   │
-                          live run │ (current agent, Gemini)
-                                   ▼
-                 LangSmith experiment  +  eval/results/<run>/items.jsonl
-                 (deterministic scores,          │
-                  traces, side-by-side)          ▼ deepeval_judge (free Groq judge)
-                                         <run>/deepeval/report.html
-```
+![Evaluation flow: build the gold set from bus_school.db and upload it as a LangSmith dataset; run the current agent over a split; read the LangSmith experiment, and score the saved answers with the DeepEval judge into report.html](docs/diagrams/evaluation-flow.svg)
 
 ### Gold set
 
