@@ -5,7 +5,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Prevent debconf warnings during package installation
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -13,24 +15,29 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements first for better caching (runtime deps only; tests use requirements-dev.txt)
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Run as an unprivileged user. Its uid should own the mounted ./database directory
+# (Chroma writes to it), so it defaults to 1000, the usual first host user.
+ARG APP_UID=1000
+RUN useradd --create-home --uid ${APP_UID} appuser
 
-# Create directory for vector database
-RUN mkdir -p /app/vector_db
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+USER appuser
 
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Liveness only: /api/status calls Gemini and needs a token, so it must not be polled
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/api/status || exit 1
+    CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Session state lives in Redis, so any worker can serve any request
+ENV UVICORN_WORKERS=2
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips='*'"]

@@ -1,7 +1,13 @@
 """
 API endpoints for transcript extraction and processing.
 """
-from fastapi import APIRouter, HTTPException
+import asyncio
+import base64
+import binascii
+import logging
+
+from fastapi import APIRouter, Depends
+from ..auth import User
 from ..schemas.transcript import (
     ExtractTranscriptRequest,
     ExtractTranscriptResponse,
@@ -9,6 +15,10 @@ from ..schemas.transcript import (
 )
 from ..services.pdf_extraction_service import PDFExtractionService
 from ..services.context_manager import get_context_manager
+from ..services.rate_limit import rate_limited
+from ..services.session_access import claim_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -25,8 +35,21 @@ def get_pdf_service():
     return _pdf_service
 
 
+def _validate_pdf(pdf_base64: str) -> None:
+    """Reject anything that is not well-formed base64 of a PDF before it is sent to Gemini."""
+    try:
+        pdf_bytes = base64.b64decode(pdf_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("Transcript must be a base64-encoded PDF file")
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise ValueError("Transcript must be a PDF file")
+
+
 @router.post("/extract-transcript", response_model=ExtractTranscriptResponse)
-async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTranscriptResponse:
+async def extract_transcript(
+    request: ExtractTranscriptRequest,
+    user: User = Depends(rate_limited("transcript", "TRANSCRIPT_RATE_LIMIT_PER_HOUR", 10, 3600)),
+) -> ExtractTranscriptResponse:
     """
     Extract and parse transcript data from a base64 encoded PDF.
     Also stores the extracted data in context_manager for subsequent chat requests.
@@ -37,14 +60,18 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
     Returns:
         ExtractTranscriptResponse with extracted data or error message
     """
+    # Ownership check first: a session that belongs to someone else is a 403, not an error payload
+    await asyncio.to_thread(claim_session, request.session_id, user)
+
     try:
         # Validate request
         if not request.pdf_base64 or len(request.pdf_base64) == 0:
             raise ValueError("PDF data is required")
-        
-        if not request.session_id or len(request.session_id) == 0:
-            raise ValueError("Session ID is required")
+        _validate_pdf(request.pdf_base64)
+    except ValueError as e:
+        return ExtractTranscriptResponse(success=False, data=None, error=str(e))
 
+    try:
         # Process PDF
         transcript_data: ExtractedTranscriptData = await get_pdf_service().process_pdf(
             request.pdf_base64
@@ -80,7 +107,7 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
             ],
             "transcript_text": transcript_data.raw_text
         }
-        context_manager.set_student_context(request.session_id, transcript_dict)
+        await asyncio.to_thread(context_manager.set_student_context, request.session_id, transcript_dict)
 
         return ExtractTranscriptResponse(
             success=True,
@@ -89,14 +116,17 @@ async def extract_transcript(request: ExtractTranscriptRequest) -> ExtractTransc
         )
 
     except ValueError as e:
+        # Processing errors can quote model output or SDK internals, so the client gets a generic message
+        logger.warning("Transcript extraction failed: %s", e)
         return ExtractTranscriptResponse(
             success=False,
             data=None,
-            error=str(e),
+            error="Could not read this transcript. Please check that it is a text-based PDF and try again.",
         )
-    except Exception as e:
+    except Exception:
+        logger.exception("Unexpected error during transcript extraction")
         return ExtractTranscriptResponse(
             success=False,
             data=None,
-            error=f"Unexpected error: {str(e)}",
+            error="Unexpected error while reading the transcript. Please try again.",
         )

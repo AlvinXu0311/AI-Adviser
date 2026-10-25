@@ -1,9 +1,18 @@
 """
 Pytest configuration and shared fixtures for backend tests.
 """
+import os
+
+# Auth and transcript storage need these before the app is imported
+os.environ.setdefault("APP_JWT_SECRET", "test-secret-for-pytest-only-0123456789abcdef")
+os.environ.setdefault("CONTEXT_STORE", "memory")
+
 import pytest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import Mock, AsyncMock, patch
+
+import fakeredis
 from app.schemas.transcript import ExtractedTranscriptData, CourseInfo, ProgramInfo
 from app.schemas.chat import TranscriptContext, ChatRequest, ChatResponse
 from datetime import date
@@ -105,3 +114,29 @@ def mock_genai_setup(mock_model):
     mock_instance.generate_content = AsyncMock(return_value=Mock(text="Test response"))
     mock_model.return_value = mock_instance
     return mock_model, mock_instance
+
+
+@pytest.fixture
+def fake_redis():
+    """Shared fake Redis for session ownership (same decode_responses as the real client)."""
+    client = fakeredis.FakeRedis(decode_responses=True)
+    memory = SimpleNamespace(redis_client=client)
+    with patch("app.services.session_access.get_conversation_memory", return_value=memory), \
+            patch("app.services.rate_limit.get_conversation_memory", return_value=memory):
+        yield client
+
+
+def auth_headers(email: str = "student@wpi.edu", name: str = "Student") -> dict:
+    """Bearer header with a real backend-issued token."""
+    from app.auth import create_access_token
+    return {"Authorization": f"Bearer {create_access_token(email, name)}"}
+
+
+@pytest.fixture
+def auth_client(fake_redis):
+    """TestClient that sends a valid token on every request."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+    client.headers.update(auth_headers())
+    return client

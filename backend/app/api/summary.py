@@ -1,11 +1,16 @@
 """
 API endpoint for generating chat summaries using Gemini.
 """
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from typing import List
+import asyncio
 import logging
 import os
+
+from ..auth import User
+from ..observability import traced_opaque
+from ..services.rate_limit import rate_limited
 
 from ..config import gemini_model
 
@@ -15,13 +20,13 @@ router = APIRouter()
 
 
 class MessageItem(BaseModel):
-    role: str
-    content: str
-    timestamp: str = ""
+    role: str = Field(..., max_length=32)
+    content: str = Field(..., max_length=20000)
+    timestamp: str = Field("", max_length=64)
 
 
 class SummaryRequest(BaseModel):
-    messages: List[MessageItem]
+    messages: List[MessageItem] = Field(..., max_length=200)
     user_name: str = "User"
     include_recommendations: bool = True
 
@@ -59,8 +64,21 @@ def get_gemini_model():
         raise
 
 
+@traced_opaque(
+    "chat_summary",
+    describe_inputs=lambda i: {"messages": i.get("message_count"), "prompt_chars": len(i.get("prompt") or "")},
+    describe_outputs=lambda r: {"finish_reason": str(getattr((getattr(r, "candidates", None) or [None])[0], "finish_reason", ""))},
+)
+def _generate_summary(model, prompt: str, message_count: int, generation_config: dict):
+    """Gemini call for the end-of-chat summary; traced without its content (it is the student's chat)."""
+    return model.generate_content(prompt, generation_config=generation_config)
+
+
 @router.post("/summarize", response_model=SummaryResponse)
-async def generate_chat_summary(request: SummaryRequest):
+async def generate_chat_summary(
+    request: SummaryRequest,
+    user: User = Depends(rate_limited("summary", "SUMMARY_RATE_LIMIT_PER_HOUR", 20, 3600)),
+):
     """
     Generate a detailed summary of the chat conversation using Gemini.
     
@@ -160,8 +178,12 @@ Now write the summary:"""
         # Call Gemini API
         model = get_gemini_model()
         
-        response = model.generate_content(
+        # Blocking SDK call: keep it off the event loop
+        response = await asyncio.to_thread(
+            _generate_summary,
+            model,
             prompt,
+            len(request.messages),
             generation_config={
                 "temperature": 0.2,  # Lower temperature for more focused output
                 "max_output_tokens": 1500,  # Reduced to encourage conciseness
@@ -267,7 +289,7 @@ Now write the summary:"""
         )
         
     except Exception as e:
-        logger.error(f"Failed to generate summary: {e}")
+        logger.error(f"Failed to generate summary: {e}", exc_info=True)
         return SummaryResponse(
             success=False,
             summary="",
@@ -275,5 +297,5 @@ Now write the summary:"""
             key_topics=[],
             requirements_discussed=[],
             recommendations=[],
-            error=str(e)
+            error="Failed to generate summary. Please try again."
         )

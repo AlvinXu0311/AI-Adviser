@@ -3,7 +3,7 @@ API endpoints for chat functionality with the LangGraph adviser agent.
 The agent uses native tool calling for database-first knowledge retrieval.
 Supports multi-turn conversation with memory management.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import logging
 import asyncio
@@ -20,10 +20,20 @@ from ..services.conversation_memory import (
     get_session_summary,
 )
 from ..agents.adviser_agent import get_adviser_agent
+from ..auth import User, get_current_user, require_admin
+from ..observability import chat_turn_trace
+from ..services.rate_limit import rate_limited
+from ..services.session_access import claim_session, release_session, require_session_owner
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Sent to the client instead of internal exception text (details stay in the server log)
+GENERIC_ERROR = "Something went wrong while answering. Please try again."
+
+# SSE must not be buffered by nginx or cached by the browser
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 # Strong references to background compaction tasks so they are not garbage-collected mid-run
 _background_tasks: set = set()
@@ -59,8 +69,13 @@ def validate_query_basic_sanity(message: str) -> tuple[bool, str]:
     return True, ""
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> StreamingResponse:
+# Each chat turn costs several LLM calls: cap it per user per minute and per day
+@router.post("/chat", response_model=ChatResponse,
+             dependencies=[Depends(rate_limited("chat-day", "CHAT_RATE_LIMIT_PER_DAY", 300, 86400))])
+async def chat(
+    request: ChatRequest,
+    user: User = Depends(rate_limited("chat-minute", "CHAT_RATE_LIMIT_PER_MINUTE", 10, 60)),
+) -> StreamingResponse:
     """
     Process a chat message with the LangGraph adviser agent and stream the response.
 
@@ -79,8 +94,12 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     Returns:
         StreamingResponse with generated message, response source, and session info
     """
-    logger.info(f"Streaming chat request received: '{request.message[:50]}...'")
+    logger.info(f"Streaming chat request received ({len(request.message)} chars)")
     started = time.perf_counter()
+
+    # Bind the session to this user before streaming, so a foreign session id is a plain 403
+    session_id = request.session_id or generate_session_id()
+    await asyncio.to_thread(claim_session, session_id, user)
     
     async def stream_generator():
         queue = asyncio.Queue()
@@ -99,8 +118,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 logger.debug("Layer 1: Validating basic input sanity")
                 is_valid, error_msg = validate_query_basic_sanity(request.message)
                 if not is_valid:
-                    logger.info(f"Query rejected at Layer 1 sanity check: '{request.message}'")
-                    session_id = generate_session_id()
+                    logger.info("Query rejected at Layer 1 sanity check")
                     await queue.put(json.dumps({
                         "type": "final",
                         "content": error_msg,
@@ -113,10 +131,6 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     await queue.put(None)
                     return
 
-                # Handle session ID and conversation memory
-                logger.debug("Generating session ID")
-                session_id = request.session_id or generate_session_id()
-                
                 # Set current session for tool access (contextvars)
                 from ..services.context_manager import set_current_session
                 set_current_session(session_id)
@@ -125,7 +139,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 logger.debug("Getting conversation memory")
                 memory = get_conversation_memory()
                 logger.debug("Adding user message to memory")
-                memory.add_user_message(session_id, request.message)
+                await asyncio.to_thread(memory.add_user_message, session_id, request.message)
                 logger.debug("User message added successfully")
 
                 # Get topic context
@@ -137,7 +151,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 logger.debug("Getting context manager")
                 context_manager = get_context_manager()
                 logger.debug(f"Getting student context for session: {session_id}")
-                cached_context = context_manager.get_student_context(session_id)
+                cached_context = await asyncio.to_thread(context_manager.get_student_context, session_id)
 
                 student_context_to_use = None
                 if cached_context and cached_context.has_transcript():
@@ -156,88 +170,99 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
                 # Conversation context = compacted summary of older turns + recent turns verbatim
                 logger.debug("Getting conversation history")
-                conversation_history = get_history(session_id)
-                conversation_summary = memory.get_compacted_summary(session_id)
+                conversation_history = await asyncio.to_thread(get_history, session_id)
+                conversation_summary = await asyncio.to_thread(memory.get_compacted_summary, session_id)
 
-                # Step 1: Intent Classification (with conversation history for context)
-                logger.debug("Step 1: Classifying user intent")
-                await queue.put(json.dumps({"type": "stage", "content": "Understanding your question"}))
-                from ..agents.intent_agent import get_intent_agent
-                intent_agent = get_intent_agent()
-                intent_classification = await intent_agent.classify(
-                    request.message, conversation_history, conversation_summary
-                )
-                logger.info(f"Intent detected: {intent_classification.intent} (confidence: {intent_classification.confidence}, is_academic: {intent_classification.is_academic})")
+                # One LangSmith trace per turn: intent + adviser graph nest under this root run
+                trace_inputs = {"message": request.message, "topic": topic_id,
+                                "has_transcript": student_context_to_use is not None}
+                with chat_turn_trace(session_id, user.id, trace_inputs) as trace_run:
+                    # Step 1: Intent Classification (with conversation history for context)
+                    logger.debug("Step 1: Classifying user intent")
+                    await queue.put(json.dumps({"type": "stage", "content": "Understanding your question"}))
+                    from ..agents.intent_agent import get_intent_agent
+                    intent_agent = get_intent_agent()
+                    intent_classification = await intent_agent.classify(
+                        request.message, conversation_history, conversation_summary
+                    )
+                    logger.info(f"Intent detected: {intent_classification.intent} (confidence: {intent_classification.confidence}, is_academic: {intent_classification.is_academic})")
 
-                # Layer 2: Intent validation - reject non-academic or low confidence queries
-                logger.debug("Layer 2: Checking intent classification")
-                CONFIDENCE_THRESHOLD = 0.2
+                    # Layer 2: Intent validation - reject non-academic or low confidence queries
+                    logger.debug("Layer 2: Checking intent classification")
+                    CONFIDENCE_THRESHOLD = 0.2
 
-                if not intent_classification.is_academic or intent_classification.confidence < CONFIDENCE_THRESHOLD:
-                    logger.info(f"Query rejected at Layer 2: is_academic={intent_classification.is_academic}, confidence={intent_classification.confidence}")
-                    response_text = ("I'm not sure how to help with that. Could you provide more context? "
-                                   "For example: 'Tell me about MSIT program' or 'What are the requirements for specializations?'")
+                    if not intent_classification.is_academic or intent_classification.confidence < CONFIDENCE_THRESHOLD:
+                        logger.info(f"Query rejected at Layer 2: is_academic={intent_classification.is_academic}, confidence={intent_classification.confidence}")
+                        response_text = ("I'm not sure how to help with that. Could you provide more context? "
+                                       "For example: 'Tell me about MSIT program' or 'What are the requirements for specializations?'")
+
+                        payload = {
+                            "type": "final",
+                            "content": response_text,
+                            "response_source": "intent_classification",
+                            "reasoning": f"Query not academic or low confidence (is_academic: {intent_classification.is_academic}, confidence: {intent_classification.confidence})",
+                            "tools_used": ["intent_classification"],
+                            "intent": intent_classification.model_dump() if intent_classification else None,
+                            "session_id": session_id,
+                        }
+                        if trace_run:
+                            trace_run.end(outputs={"response": response_text, "response_source": "intent_classification"})
+                            payload["trace_id"] = str(trace_run.trace_id)
+                        await queue.put(json.dumps(payload))
+                        await queue.put(None)
+                        return
+
+                    # Log confidence level for debugging
+                    logger.info(f"Intent classification passed. Proceeding to adviser agent.")
+
+                    # Step 2: Route to RAG Agent based on intent
+                    logger.debug("Step 2: Routing to RAG agent")
+                    await queue.put(json.dumps({"type": "stage", "content": "Planning which sources to check"}))
+                    adviser_agent = get_adviser_agent()
+
+                    async def forward_event(event: dict) -> None:
+                        await queue.put(json.dumps(event))
+
+                    # Call RAG agent with intent context
+                    logger.debug("Step 3: Calling RAG agent with intent context")
+                    result = await adviser_agent.answer_query(
+                        query=request.message,
+                        context=student_context_to_use,
+                        session_id=session_id,
+                        conversation_history=conversation_history,
+                        topic_id=topic_id,  # Pass selected topic
+                        on_event=forward_event,
+                        conversation_summary=conversation_summary,
+                    )
+
+                    response_text = result.get("response", "")
+                    logger.debug("RAG agent response generated")
+                    await asyncio.to_thread(memory.add_ai_message, session_id, response_text)
 
                     payload = {
                         "type": "final",
                         "content": response_text,
-                        "response_source": "intent_classification",
-                        "reasoning": f"Query not academic or low confidence (is_academic: {intent_classification.is_academic}, confidence: {intent_classification.confidence})",
-                        "tools_used": ["intent_classification"],
+                        "response_source": result.get("source", "agentic_rag"),
+                        "reasoning": result.get("reasoning", ""),
+                        "tools_used": result.get("tools_used", []),
                         "intent": intent_classification.model_dump() if intent_classification else None,
                         "session_id": session_id,
                     }
+                    if trace_run:
+                        trace_run.end(outputs={"response": response_text, "tools_used": payload["tools_used"],
+                                               "response_source": payload["response_source"]})
+                        # Lets a client attach feedback (thumbs up/down) to this trace later
+                        payload["trace_id"] = str(trace_run.trace_id)
                     await queue.put(json.dumps(payload))
-                    await queue.put(None)
-                    return
-
-                # Log confidence level for debugging
-                logger.info(f"Intent classification passed. Proceeding to adviser agent.")
-
-                # Step 2: Route to RAG Agent based on intent
-                logger.debug("Step 2: Routing to RAG agent")
-                await queue.put(json.dumps({"type": "stage", "content": "Planning which sources to check"}))
-                adviser_agent = get_adviser_agent()
-
-                async def forward_event(event: dict) -> None:
-                    await queue.put(json.dumps(event))
-
-                # Call RAG agent with intent context
-                logger.debug("Step 3: Calling RAG agent with intent context")
-                result = await adviser_agent.answer_query(
-                    query=request.message,
-                    context=student_context_to_use,
-                    program_id="msit",  # Default program, could be parameterized
-                    session_id=session_id,
-                    conversation_history=conversation_history,
-                    topic_id=topic_id,  # Pass selected topic
-                    on_event=forward_event,
-                    conversation_summary=conversation_summary,
-                )
-
-                response_text = result.get("response", "")
-                logger.debug("RAG agent response generated")
-                memory.add_ai_message(session_id, response_text)
-
-                payload = {
-                    "type": "final",
-                    "content": response_text,
-                    "response_source": result.get("source", "agentic_rag"),
-                    "reasoning": result.get("reasoning", ""),
-                    "tools_used": result.get("tools_used", []),
-                    "intent": intent_classification.model_dump() if intent_classification else None,
-                    "session_id": session_id,
-                }
-                await queue.put(json.dumps(payload))
 
                 latency_ms = (time.perf_counter() - started) * 1000
-                memory.record_latency(latency_ms)
+                await asyncio.to_thread(memory.record_latency, latency_ms)
                 logger.info(f"Chat answered in {latency_ms:.0f} ms")
                 _compact_in_background(memory, session_id)
 
             except Exception as e:
                 logger.error(f"Error in agent task: {e}", exc_info=True)
-                await queue.put(json.dumps({"type": "error", "content": str(e)}))
+                await queue.put(json.dumps({"type": "error", "content": GENERIC_ERROR}))
             finally:
                 await queue.put(None)
 
@@ -251,11 +276,11 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         
         await task
 
-    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+    return StreamingResponse(stream_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.get("/chat/history/{session_id}")
-async def get_conversation_history(session_id: str):
+async def get_conversation_history(session_id: str, user: User = Depends(get_current_user)):
     """
     Retrieve conversation history for a given session ID.
 
@@ -265,11 +290,11 @@ async def get_conversation_history(session_id: str):
     Returns:
         Dict containing conversation history and metadata
     """
-    logger.info(f"Retrieving conversation history for session: {session_id}")
+    await asyncio.to_thread(require_session_owner, session_id, user)
+    logger.info(f"Retrieving conversation history for session: {session_id[:8]}...")
 
-    try:
+    def load() -> dict:
         history = get_history(session_id)
-
         return {
             "session_id": session_id,
             "message_count": len(history),
@@ -278,13 +303,15 @@ async def get_conversation_history(session_id: str):
             "messages": history
         }
 
+    try:
+        return await asyncio.to_thread(load)
     except Exception as e:
         logger.error(f"Error retrieving conversation history: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving history")
 
 
 @router.delete("/chat/history/{session_id}")
-async def clear_conversation_history(session_id: str):
+async def clear_conversation_history(session_id: str, user: User = Depends(get_current_user)):
     """
     Clear conversation history for a given session ID.
 
@@ -294,10 +321,16 @@ async def clear_conversation_history(session_id: str):
     Returns:
         Success message
     """
-    logger.info(f"Clearing conversation history for session: {session_id}")
+    await asyncio.to_thread(require_session_owner, session_id, user)
+    logger.info(f"Clearing conversation history for session: {session_id[:8]}...")
+
+    def clear() -> None:
+        clear_session(session_id)
+        get_context_manager().clear_student_context(session_id)
+        release_session(session_id)
 
     try:
-        clear_session(session_id)
+        await asyncio.to_thread(clear)
 
         return {
             "status": "success",
@@ -306,11 +339,11 @@ async def clear_conversation_history(session_id: str):
 
     except Exception as e:
         logger.error(f"Error clearing conversation history: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error clearing history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error clearing history")
 
 
 @router.get("/chat/memory/stats")
-async def get_memory_stats():
+async def get_memory_stats(admin: User = Depends(require_admin)):
     """
     Get memory management statistics.
 
@@ -318,10 +351,8 @@ async def get_memory_stats():
         Dict with conversation memory stats
     """
     try:
-        memory = get_conversation_memory()
-        stats = memory.get_stats()
-        return stats
+        return await asyncio.to_thread(get_conversation_memory().get_stats)
 
     except Exception as e:
         logger.error(f"Error retrieving memory stats: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving stats")

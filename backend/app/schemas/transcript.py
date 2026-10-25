@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import date
+import os
+
+# Largest transcript PDF accepted, and the matching base64 length (4 chars per 3 bytes)
+MAX_TRANSCRIPT_BYTES = int(os.getenv("MAX_TRANSCRIPT_MB", "10")) * 1024 * 1024
+MAX_TRANSCRIPT_BASE64_CHARS = (MAX_TRANSCRIPT_BYTES + 2) // 3 * 4
 
 
 class CourseInfo(BaseModel):
@@ -64,8 +69,8 @@ class ExtractedTranscriptData(BaseModel):
 
 class ExtractTranscriptRequest(BaseModel):
     """Schema for transcript extraction request"""
-    pdf_base64: str = Field(..., description="Base64 encoded PDF file content")
-    session_id: str = Field(..., description="Unique session identifier from the frontend")
+    pdf_base64: str = Field(..., max_length=MAX_TRANSCRIPT_BASE64_CHARS, description="Base64 encoded PDF file content")
+    session_id: str = Field(..., max_length=128, description="Unique session identifier from the frontend")
 
     class Config:
         json_schema_extra = {

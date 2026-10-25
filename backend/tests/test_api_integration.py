@@ -8,15 +8,23 @@ from app.main import app
 from app.schemas.chat import ChatRequest, TranscriptContext
 from app.schemas.transcript import ExtractTranscriptRequest
 
+SESSION_ID = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.fixture
+def valid_pdf_base64() -> str:
+    import base64
+    return base64.b64encode(b"%PDF-1.4\n%test transcript\n").decode()
+
 
 @pytest.mark.integration
 class TestChatEndpoint:
     """Integration tests for chat endpoint"""
 
     @pytest.fixture
-    def client(self):
-        """Create a test client"""
-        return TestClient(app)
+    def client(self, auth_client):
+        """Create an authenticated test client"""
+        return auth_client
 
     def test_chat_endpoint_empty_message(self, client):
         """Test chat endpoint with empty message"""
@@ -83,13 +91,14 @@ class TestTranscriptEndpoint:
     """Integration tests for transcript extraction endpoint"""
 
     @pytest.fixture
-    def client(self):
-        """Create a test client"""
-        return TestClient(app)
+    def client(self, auth_client):
+        """Create an authenticated test client"""
+        return auth_client
 
-    def test_extract_transcript_success(self, client, mock_pdf_base64):
+    def test_extract_transcript_success(self, client, valid_pdf_base64):
         """Test successful transcript extraction"""
-        with patch("app.services.pdf_extraction_service.PDFExtractionService.process_pdf") as mock_pdf:
+        with patch("app.services.pdf_extraction_service.PDFExtractionService.process_pdf") as mock_pdf, \
+                patch("app.api.transcript.get_context_manager") as mock_cm:
             from app.schemas.transcript import ExtractedTranscriptData, ProgramInfo
             mock_pdf.return_value = ExtractedTranscriptData(
                 student_name="John Doe",
@@ -100,18 +109,19 @@ class TestTranscriptEndpoint:
 
             response = client.post(
                 "/api/extract-transcript",
-                json={"pdf_base64": mock_pdf_base64}
+                json={"pdf_base64": valid_pdf_base64, "session_id": SESSION_ID}
             )
 
             assert response.status_code == 200
             assert response.json()["success"] is True
             assert response.json()["data"]["student_name"] == "John Doe"
+            mock_cm.return_value.set_student_context.assert_called_once()
 
     def test_extract_transcript_empty_pdf(self, client):
         """Test transcript extraction with empty PDF"""
         response = client.post(
             "/api/extract-transcript",
-            json={"pdf_base64": ""}
+            json={"pdf_base64": "", "session_id": SESSION_ID}
         )
 
         assert response.status_code == 200
@@ -137,19 +147,33 @@ class TestTranscriptEndpoint:
 
         assert response.status_code == 422
 
-    def test_extract_transcript_api_error(self, client, mock_pdf_base64):
-        """Test transcript extraction when PDF service fails"""
+    def test_extract_transcript_api_error(self, client, valid_pdf_base64):
+        """Processing errors return a generic message, not the internal exception text"""
         with patch("app.services.pdf_extraction_service.PDFExtractionService.process_pdf") as mock_pdf:
-            mock_pdf.side_effect = ValueError("Invalid PDF")
+            mock_pdf.side_effect = ValueError("PDF processing failed: upstream 500 at key=abc")
 
             response = client.post(
                 "/api/extract-transcript",
-                json={"pdf_base64": mock_pdf_base64}
+                json={"pdf_base64": valid_pdf_base64, "session_id": SESSION_ID}
             )
 
             assert response.status_code == 200
             assert response.json()["success"] is False
-            assert "Invalid PDF" in response.json()["error"]
+            assert "upstream" not in response.json()["error"]
+            assert "Could not read this transcript" in response.json()["error"]
+
+    def test_extract_transcript_rejects_non_pdf(self, client):
+        """Files that are not PDFs are rejected before reaching Gemini"""
+        import base64
+        with patch("app.services.pdf_extraction_service.PDFExtractionService.process_pdf") as mock_pdf:
+            response = client.post(
+                "/api/extract-transcript",
+                json={"pdf_base64": base64.b64encode(b"MZ not a pdf").decode(), "session_id": SESSION_ID}
+            )
+
+            assert response.json()["success"] is False
+            assert "PDF" in response.json()["error"]
+            mock_pdf.assert_not_called()
 
 
 @pytest.mark.integration
@@ -184,9 +208,9 @@ class TestCORSHeaders:
     """Integration tests for CORS configuration"""
 
     @pytest.fixture
-    def client(self):
-        """Create a test client"""
-        return TestClient(app)
+    def client(self, auth_client):
+        """Create an authenticated test client"""
+        return auth_client
 
     def test_cors_headers_present(self, client):
         """Test that CORS headers are properly set"""
@@ -221,9 +245,9 @@ class TestErrorHandling:
     """Integration tests for error handling"""
 
     @pytest.fixture
-    def client(self):
-        """Create a test client"""
-        return TestClient(app)
+    def client(self, auth_client):
+        """Create an authenticated test client"""
+        return auth_client
 
     def test_404_not_found(self, client):
         """Test 404 response for non-existent endpoint"""

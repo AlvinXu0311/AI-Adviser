@@ -345,24 +345,14 @@ def get_conversation_memory() -> RedisConversationMemory:
     return _conversation_memory
 
 
-def generate_session_id(identifier: str = "") -> str:
-    """
-    Generate a unique session ID.
+def generate_session_id() -> str:
+    """Generate an unguessable session ID (sessions are also bound to their owner, see session_access.py)."""
+    import uuid
 
-    Args:
-        identifier: Optional user/session identifier to hash
+    return uuid.uuid4().hex
 
-    Returns:
-        Unique session ID
-    """
-    import hashlib
 
-    if identifier:
-        return hashlib.md5(identifier.encode()).hexdigest()[:16]
-    else:
-        return hashlib.md5(str(datetime.now()).encode()).hexdigest()[:16]
-
-    # Backwards-compatible wrappers expected by API
+# Backwards-compatible wrappers expected by API
 
 
 def get_history(session_id: str):

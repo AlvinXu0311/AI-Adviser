@@ -1,6 +1,6 @@
-import { FC, useState } from 'react';
+import { FC, FormEvent, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { loginWithMicrosoft, isMsalConfigured, storeSession } from '../services/authService';
+import { loginWithMicrosoft, loginWithDemo, getAuthConfig, isMsalConfigured } from '../services/authService';
 import { User } from '../types';
 
 interface LoginPageProps {
@@ -11,12 +11,19 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  // Form state removed - demo mode uses one-click login
-  
+  const [demoEmail, setDemoEmail] = useState('');
+  const [demoPassword, setDemoPassword] = useState('');
+  // Demo login exists only when the backend enables it (DEMO_LOGIN_ENABLED=true)
+  const [demoEnabled, setDemoEnabled] = useState(false);
+
   // Check if Microsoft SSO is configured
   const msalConfigured = isMsalConfigured();
   // Default to WPI email form if MSAL not configured
   const [showMicrosoftLogin, setShowMicrosoftLogin] = useState(msalConfigured);
+
+  useEffect(() => {
+    getAuthConfig().then((config) => setDemoEnabled(config.demo_login));
+  }, []);
 
   // Handle Microsoft SSO Login
   const handleMicrosoftLogin = async () => {
@@ -54,24 +61,17 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
     }
   };
 
-  // Demo mode login - one click with default demo_user
-  const handleDemoLogin = async () => {
+  // Demo account login - credentials are checked by the backend
+  const handleDemoLogin = async (e: FormEvent) => {
+    e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const user: User = {
-        email: 'demo_user@wpi.edu',
-        name: 'Demo User',
-        loginTime: new Date(),
-      };
-
-      storeSession(user);
+      const user: User = await loginWithDemo(demoEmail.trim(), demoPassword);
       onLogin(user);
-    } catch {
-      setError('Failed to start demo mode. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Demo sign-in failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -171,23 +171,42 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
             </div>
           )}
 
-          {/* Demo Mode - one-click login */}
-          {!showMicrosoftLogin && (
-            <div className="space-y-5">
-              <div className="text-center py-4">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4">
-                  <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  Click below to enter as <strong>Demo User</strong>
-                </p>
+          {/* Demo account - email + password, verified by the backend */}
+          {!showMicrosoftLogin && !demoEnabled && (
+            <p className="text-center text-sm text-gray-500">
+              Demo login is disabled on this server.
+            </p>
+          )}
+
+          {!showMicrosoftLogin && demoEnabled && (
+            <form className="space-y-4" onSubmit={handleDemoLogin}>
+              <div>
+                <label htmlFor="demo-email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  id="demo-email"
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={demoEmail}
+                  onChange={(e) => setDemoEmail(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#AC2B37]/40 focus:border-[#AC2B37]"
+                />
+              </div>
+              <div>
+                <label htmlFor="demo-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                <input
+                  id="demo-password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={demoPassword}
+                  onChange={(e) => setDemoPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#AC2B37]/40 focus:border-[#AC2B37]"
+                />
               </div>
 
               <button
-                type="button"
-                onClick={handleDemoLogin}
+                type="submit"
                 disabled={isLoading}
                 className="w-full py-3 px-4 bg-[#AC2B37] hover:bg-[#8B1C26] text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
@@ -197,14 +216,14 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    <span>Entering...</span>
+                    <span>Signing in...</span>
                   </>
                 ) : (
                   <>
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                     </svg>
-                    <span>Enter Demo Mode</span>
+                    <span>Sign in to Demo</span>
                   </>
                 )}
               </button>
@@ -218,7 +237,7 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
                   ← Back to Microsoft Sign In
                 </button>
               )}
-            </div>
+            </form>
           )}
 
           {/* Error Message */}
@@ -236,7 +255,7 @@ export const LoginPage: FC<LoginPageProps> = ({ onLogin }) => {
           )}
 
           {/* Demo Mode Toggle - show switch to demo when Microsoft login is showing */}
-          {showMicrosoftLogin && (
+          {showMicrosoftLogin && demoEnabled && (
             <div className="mt-6 pt-4 border-t border-gray-200">
               <button
                 onClick={() => setShowMicrosoftLogin(false)}

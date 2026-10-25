@@ -8,6 +8,7 @@ The agent node calls the model with the tools bound; tools_condition routes to t
 ToolNode while the model keeps requesting tools, and to END once it answers.
 After MAX_TOOL_ROUNDS tool rounds the agent is called without tools so it must answer.
 """
+import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -247,7 +248,7 @@ class AdviserAgent:
         self,
         query: str,
         context: Optional[Any] = None,  # Can be ExtractedTranscriptData or TranscriptContext or StudentContext
-        program_id: str = "msit",
+        program_id: Optional[str] = None,
         session_id: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         topic_id: Optional[str] = None,  # Selected advising topic: 'general' or 'course'
@@ -260,7 +261,7 @@ class AdviserAgent:
         Args:
             query: Student's question
             context: Optional transcript context (StudentContext from session-based storage)
-            program_id: Program identifier (msit, msba, msm)
+            program_id: Program identifier (msit, msba, msm) the student explicitly chose; None if unknown
             session_id: Session ID for context isolation
             conversation_history: Prior turns as {role, content} dicts
             topic_id: Selected advising topic
@@ -277,8 +278,10 @@ class AdviserAgent:
             logger.info(f"Session ID: {session_id[:8] if session_id else 'None'}...")
 
             has_transcript = self._has_transcript(context)
+            # The prefetch runs blocking SQLite/vector queries, so keep it off the event loop
+            prefetched_query = await asyncio.to_thread(self._with_db_prefetch, query)
             input_text = self._format_agent_input(
-                self._with_db_prefetch(query), context, program_id, self._topic_guidance(topic_id)
+                prefetched_query, context, program_id, self._topic_guidance(topic_id)
             )
             messages = [*_history_to_messages(conversation_history, query), HumanMessage(content=input_text)]
 
@@ -393,7 +396,7 @@ class AdviserAgent:
     def _has_transcript(context: Optional[Any]) -> bool:
         from ..services.context_manager import StudentContext
         if isinstance(context, StudentContext) and context.has_transcript():
-            logger.info(f"Using StudentContext: student={context.student_name}, courses={len(context.courses)}")
+            logger.info(f"Using StudentContext: courses={len(context.courses)}")
             return True
         logger.info("No transcript context - user must upload PDF for personalized info")
         return False
@@ -417,7 +420,7 @@ class AdviserAgent:
         self,
         query: str,
         context: Optional[Any] = None,
-        program_id: str = "msit",
+        program_id: Optional[str] = None,
         topic_guidance: str = ""
     ) -> str:
         """Format the current turn's input, handling StudentContext from session-based storage"""
@@ -432,10 +435,8 @@ class AdviserAgent:
 
         if context and isinstance(context, StudentContext) and context.has_transcript():
             input_text += f"\nStudent Context:\n"
-            if context.student_name:
-                input_text += f"- Name: {context.student_name}\n"
-            if context.student_id:
-                input_text += f"- Student ID: {context.student_id}\n"
+            # Name and student ID are deliberately left out: advising needs neither, and whatever the
+            # model sees can end up in its answer, its reasoning and therefore in traces
             if context.gpa is not None:
                 input_text += f"- GPA: {context.gpa}/4.0\n"
             if context.degree_program:
@@ -445,7 +446,9 @@ class AdviserAgent:
             if context.courses:
                 input_text += f"- Completed Courses: {len(context.courses)}\n"
 
-        input_text += f"\nProgram: {program_id.upper()}"
+        # Only state a program that actually came from the user; never guess one (the agent asks instead)
+        if program_id:
+            input_text += f"\nProgram: {program_id.upper()}"
 
         return input_text
 

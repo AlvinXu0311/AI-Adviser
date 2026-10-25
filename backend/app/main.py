@@ -2,13 +2,18 @@
 Main FastAPI application for WPI Business School Chatbot.
 Uses Google Gemini for all LLM calls.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from .api.auth import router as auth_router
 from .api.chat import router as chat_router
 from .api.transcript import router as transcript_router
 from .api.status import router as status_router
 from .api.summary import router as summary_router
 from .api.admin import router as admin_router
+from .auth import _jwt_secret
+from .observability import setup_tracing
+from .schemas.transcript import MAX_TRANSCRIPT_BASE64_CHARS
 from dotenv import load_dotenv
 import os
 import logging
@@ -77,6 +82,68 @@ else:
         allow_headers=["*"],
     )
 
+# Reject oversized bodies before they are read into memory (nginx enforces the same limit)
+MAX_REQUEST_BYTES = MAX_TRANSCRIPT_BASE64_CHARS + 1024 * 1024
+
+
+class BodySizeLimitMiddleware:
+    """
+    413 for request bodies over `max_bytes`: up front from Content-Length, and by counting bytes
+    as they are received for chunked uploads that send no Content-Length.
+    """
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        too_large = JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        content_length = dict(scope["headers"]).get(b"content-length", b"")
+        if content_length.isdigit() and int(content_length) > self.max_bytes:
+            return await too_large(scope, receive, send)
+
+        received = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # An HTTPException passes through FastAPI's body parsing and becomes a 413
+                    raise HTTPException(status_code=413, detail="Request body too large")
+            return message
+
+        async def tracking_send(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except HTTPException as exc:
+            if exc.status_code != 413 or response_started:
+                raise
+            await too_large(scope, receive, send)
+
+
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
+
+
+@app.on_event("startup")
+async def check_auth_config() -> None:
+    """Refuse to start without a signing secret, instead of failing on the first login; set up tracing."""
+    _jwt_secret()
+    setup_tracing()
+    if os.getenv("DEMO_LOGIN_ENABLED", "false").lower() == "true":
+        logger.warning("Demo login is ENABLED (DEMO_LOGIN_ENABLED=true); disable it in production")
+
+
 # Configure the legacy google.generativeai SDK (used by transcript extraction)
 import google.generativeai as genai
 api_key = os.getenv("GOOGLE_API_KEY")
@@ -87,6 +154,7 @@ else:
     logger.info("[INFO] Google Gemini API configured")
 
 # Include routers
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(transcript_router, prefix="/api", tags=["transcript"])
 app.include_router(status_router, prefix="/api", tags=["status"])

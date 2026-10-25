@@ -1,3 +1,5 @@
+import { apiFetch } from './apiClient';
+
 type ChatRequest = {
   message: string;
   transcript_context?: any;
@@ -5,21 +7,14 @@ type ChatRequest = {
   topic_id?: string;  // Selected advising topic: 'general' or 'course'
 };
 
-// Use empty string for Docker (nginx proxy), or localhost for local dev
-// VITE_BACKEND_URL="" means use relative paths (nginx will proxy /api to backend)
-const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL !== undefined 
-  ? import.meta.env.VITE_BACKEND_URL 
-  : 'http://localhost:8000').replace(/\/$/, '');
-
 // Stream chat responses from `/api/chat` (text/event-stream). The backend returns SSE-style
 // chunks prefixed with `data:`. We use fetch+ReadableStream to consume and parse them.
 export async function streamChat(
   req: ChatRequest,
   onEvent: (evt: { type: string; data?: any }) => void
 ) {
-  const res = await fetch(`${API_BASE_URL}/api/chat`, {
+  const res = await apiFetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
 
@@ -93,9 +88,8 @@ export async function extractTranscript(file: File, sessionId: string) {
 
   const b64 = await toBase64(file);
 
-  const res = await fetch(`${API_BASE_URL}/api/extract-transcript`, {
+  const res = await apiFetch('/api/extract-transcript', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pdf_base64: b64, session_id: sessionId }),
   });
 

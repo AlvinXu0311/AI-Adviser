@@ -34,9 +34,14 @@ Thumbs.db
 *.log
 logs/
 
-# Environment
+# Environment (secrets come from compose at runtime, never baked into the image)
+.env
 .env.local
 .env.*.local
+
+# Not needed at runtime
+tests/
+eval/
 
 # Temporary files
 *.tmp

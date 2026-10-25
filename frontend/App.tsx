@@ -5,7 +5,7 @@ import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
 import { EndChatModal } from './components/EndChatModal';
 import { ChatState, AgentStatus, User } from './types';
-import { getStoredSession, storeSession, clearSession, generateSessionId, logoutFromMicrosoft } from './services/authService';
+import { getStoredSession, clearSession, logoutFromMicrosoft } from './services/authService';
 import { initializeMsal } from './config/msalConfig';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -63,17 +63,12 @@ const App: FC = () => {
     }
   }, [user]);
 
+  // The login flows store the session and backend token themselves (authService.storeSession)
   const handleLogin = (loginUser: User) => {
-    const newUser: User = {
+    setUser({
       ...loginUser,
       loginTime: loginUser.loginTime || new Date()
-    };
-    storeSession(newUser);
-    setUser(newUser);
-    
-    // Store session ID for chat API calls
-    const sessionId = generateSessionId(loginUser.email);
-    sessionStorage.setItem('chat_session_id', sessionId);
+    });
   };
 
   const handleLogout = async () => {
@@ -85,7 +80,6 @@ const App: FC = () => {
     }
     clearSession();
     setUser(null);
-    sessionStorage.removeItem('chat_session_id');
     setChatState({
       messages: [],
       isLoading: false,

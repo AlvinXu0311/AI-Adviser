@@ -6,16 +6,24 @@ services:
     image: redis:7-alpine
     container_name: ai-adviser-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # No published port: only the backend reaches Redis, over the internal network
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --maxmemory 512mb --maxmemory-policy volatile-lru"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 640M
     networks:
       - ai-adviser-network
 
@@ -24,10 +32,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
     container_name: ai-adviser-backend
     restart: unless-stopped
+    # Published on loopback only for local debugging; browsers go through the frontend's nginx
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       # LLM Configuration
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
@@ -42,10 +53,34 @@ services:
       - QWEN_MODEL=${QWEN_MODEL:-adviser-lora}
       - QWEN_API_KEY=${QWEN_API_KEY:-EMPTY}
 
-      # Redis Configuration
+      # Redis Configuration (REDIS_URL carries the password and takes precedence)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+
+      # Auth: backend-issued JWTs; Microsoft sign-in is enabled when both AZURE_* are set
+      - APP_JWT_SECRET=${APP_JWT_SECRET:?Set APP_JWT_SECRET in .env}
+      - CONTEXT_ENCRYPTION_KEY=${CONTEXT_ENCRYPTION_KEY:-}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID:-}
+      - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-wpi.edu,alumni.wpi.edu}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      # Demo account: off unless explicitly enabled; never enable in production
+      - DEMO_LOGIN_ENABLED=${DEMO_LOGIN_ENABLED:-false}
+      - DEMO_USER_EMAIL=${DEMO_USER_EMAIL:-}
+      - DEMO_USER_PASSWORD=${DEMO_USER_PASSWORD:-}
+      - MAX_TRANSCRIPT_MB=${MAX_TRANSCRIPT_MB:-10}
+      # Rate limits (per user unless noted; 0 disables one). Login lockout is per email and per IP.
+      - CHAT_RATE_LIMIT_PER_MINUTE=${CHAT_RATE_LIMIT_PER_MINUTE:-10}
+      - CHAT_RATE_LIMIT_PER_DAY=${CHAT_RATE_LIMIT_PER_DAY:-300}
+      - TRANSCRIPT_RATE_LIMIT_PER_HOUR=${TRANSCRIPT_RATE_LIMIT_PER_HOUR:-10}
+      - SUMMARY_RATE_LIMIT_PER_HOUR=${SUMMARY_RATE_LIMIT_PER_HOUR:-20}
+      - STATUS_RATE_LIMIT_PER_MINUTE=${STATUS_RATE_LIMIT_PER_MINUTE:-6}
+      - MICROSOFT_LOGIN_RATE_LIMIT_PER_MINUTE=${MICROSOFT_LOGIN_RATE_LIMIT_PER_MINUTE:-20}
+      - LOGIN_MAX_FAILURES=${LOGIN_MAX_FAILURES:-5}
+      - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-900}
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
       # Chat context compaction (rolling summary of older turns)
       - COMPACTION_TRIGGER_MESSAGES=${COMPACTION_TRIGGER_MESSAGES:-16}
       - COMPACTION_TRIGGER_TOKENS=${COMPACTION_TRIGGER_TOKENS:-6000}
@@ -53,7 +88,16 @@ services:
 
       # CORS Configuration (allow frontend access from browser)
       - ALLOW_ALL_ORIGINS=false
-      - FRONTEND_URL=http://localhost:8080,http://localhost:3000,http://localhost:5173
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+
+      # LangSmith tracing (off unless LANGSMITH_TRACING=true and an API key is set).
+      # PII redaction stays on unless LANGSMITH_REDACT_PII=false.
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-false}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-wpi-adviser}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      - LANGSMITH_REDACT_PII=${LANGSMITH_REDACT_PII:-true}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
 
       # Other settings
       - STREAMING_DISABLED=false
@@ -71,11 +115,18 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 3G
     networks:
       - ai-adviser-network
 
@@ -84,19 +135,29 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_MSAL_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+        VITE_MSAL_TENANT_ID: ${AZURE_TENANT_ID:-}
     container_name: ai-adviser-frontend
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8080:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - ai-adviser-network
 

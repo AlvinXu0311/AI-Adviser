@@ -4,8 +4,12 @@ import logging
 import os
 from typing import Dict
 
-from fastapi import APIRouter
+import asyncio
 
+from fastapi import APIRouter, Depends
+
+from ..auth import User
+from ..services.rate_limit import rate_limited
 from ..config import gemini_model
 from ..services.pdf_vector_service import get_pdf_vector_service
 
@@ -54,7 +58,7 @@ def _check_vector_db() -> Dict[str, str]:
         )
     except Exception as exc:
         logger.exception("Vector DB status check failed")
-        return _status_payload("vector_db", "Vector DB", "offline", str(exc))
+        return _status_payload("vector_db", "Vector DB", "offline", "Vector index unavailable")
 
 
 def _check_gemini() -> Dict[str, str]:
@@ -94,11 +98,7 @@ def _check_gemini() -> Dict[str, str]:
         )
     except Exception as exc:
         logger.exception("Gemini status check failed")
-        error_msg = str(exc)
-        # Truncate error message if too long
-        if len(error_msg) > 100:
-            error_msg = error_msg[:100] + "..."
-        return _status_payload("gemini", "Gemini", "offline", error_msg)
+        return _status_payload("gemini", "Gemini", "offline", "Model unreachable")
 
 
 def _check_streaming() -> Dict[str, str]:
@@ -122,13 +122,15 @@ def _check_streaming() -> Dict[str, str]:
 
 
 @router.get("/status")
-async def get_system_status():
-    """Return health for the core subsystems used by the adviser."""
-    components = [
-        _check_vector_db(),
-        _check_gemini(),
-        _check_streaming(),
-    ]
+async def get_system_status(
+    user: User = Depends(rate_limited("status", "STATUS_RATE_LIMIT_PER_MINUTE", 6, 60)),
+):
+    """Return health for the core subsystems used by the adviser (makes a real Gemini call)."""
+    # Both checks block (Chroma read, Gemini round trip), so run them in threads concurrently
+    vector_db, gemini = await asyncio.gather(
+        asyncio.to_thread(_check_vector_db), asyncio.to_thread(_check_gemini)
+    )
+    components = [vector_db, gemini, _check_streaming()]
 
     overall = "online" if all(c["status"] == "online" for c in components) else "degraded"
 

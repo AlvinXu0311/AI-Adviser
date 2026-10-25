@@ -1,12 +1,16 @@
 """
 Admin API endpoints for maintenance tasks.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+import asyncio
 import logging
+
+from ..auth import require_admin
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# Every admin route requires a token whose email is listed in ADMIN_EMAILS
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 @router.post("/rebuild-pdf-index")
@@ -32,7 +36,7 @@ async def rebuild_pdf_index():
         before_stats = service.get_stats()
         
         # Rebuild
-        service.rebuild_index()
+        await asyncio.to_thread(service.rebuild_index)
         
         # Get stats after
         after_stats = service.get_stats()
@@ -47,8 +51,8 @@ async def rebuild_pdf_index():
         }
         
     except Exception as e:
-        logger.error(f"Error rebuilding PDF index: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to rebuild index: {str(e)}")
+        logger.error(f"Error rebuilding PDF index: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to rebuild index")
 
 
 @router.get("/pdf-index-stats")
@@ -68,8 +72,8 @@ async def get_pdf_index_stats():
         }
         
     except Exception as e:
-        logger.error(f"Error getting PDF index stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+        logger.error(f"Error getting PDF index stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get stats")
 
 
 @router.post("/test-pdf-search")
@@ -81,7 +85,7 @@ async def test_pdf_search(query: str = "MBA program requirements", top_k: int = 
         from ..services.pdf_vector_service import get_pdf_vector_service
         
         service = get_pdf_vector_service()
-        results = service.search(query, top_k=top_k)
+        results = await asyncio.to_thread(service.search, query, top_k=min(top_k, 50))
         
         return {
             "status": "success",
@@ -91,5 +95,5 @@ async def test_pdf_search(query: str = "MBA program requirements", top_k: int = 
         }
         
     except Exception as e:
-        logger.error(f"Error testing PDF search: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        logger.error(f"Error testing PDF search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Search failed")

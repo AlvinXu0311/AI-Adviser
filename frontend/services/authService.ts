@@ -5,6 +5,7 @@
 
 import { AccountInfo } from '@azure/msal-browser';
 import { msalInstance, loginRequest, isMsalConfigured } from '../config/msalConfig';
+import { API_BASE_URL } from '../config/api';
 
 export interface User {
   email: string;
@@ -14,7 +15,55 @@ export interface User {
 }
 
 const AUTH_STORAGE_KEY = 'wpi_adviser_auth';
-const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+// Backend token response (POST /api/auth/demo-login, /api/auth/microsoft)
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  email: string;
+  name: string;
+}
+
+export interface AuthConfig {
+  demo_login: boolean;
+  microsoft_login: boolean;
+}
+
+/**
+ * Which sign-in methods the backend has enabled
+ */
+export async function getAuthConfig(): Promise<AuthConfig> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/config`);
+    if (res.ok) return res.json();
+  } catch (error) {
+    console.error('[Auth] Failed to load auth config:', error);
+  }
+  return { demo_login: false, microsoft_login: false };
+}
+
+async function exchangeForSession(path: string, body: object, microsoftAccount?: AccountInfo): Promise<User> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((d) => d.detail).catch(() => '');
+    throw new Error(detail || `Sign-in failed (${res.status})`);
+  }
+  const token: TokenResponse = await res.json();
+  const user: User = { email: token.email, name: token.name, loginTime: new Date(), microsoftAccount };
+  storeSession(user, token.access_token, token.expires_in);
+  return user;
+}
+
+/**
+ * Login with the demo account (only works when the backend has DEMO_LOGIN_ENABLED=true)
+ */
+export async function loginWithDemo(email: string, password: string): Promise<User> {
+  return exchangeForSession('/api/auth/demo-login', { email, password });
+}
 
 /**
  * Login with Microsoft SSO (popup method)
@@ -34,15 +83,8 @@ export async function loginWithMicrosoft(): Promise<User | null> {
         throw new Error('Please use your WPI email address (@wpi.edu or @alumni.wpi.edu)');
       }
       
-      const user: User = {
-        email: email,
-        name: account.name || email.split('@')[0],
-        loginTime: new Date(),
-        microsoftAccount: account,
-      };
-      
-      storeSession(user);
-      return user;
+      // The backend verifies the ID token itself and issues its own access token
+      return await exchangeForSession('/api/auth/microsoft', { id_token: response.idToken }, account);
     }
     return null;
   } catch (error) {
@@ -98,16 +140,32 @@ export function isMicrosoftAuthenticated(): boolean {
 }
 
 /**
- * Store user session in localStorage
+ * Store user session and the backend access token in localStorage
  */
-export function storeSession(user: User): void {
+export function storeSession(user: User, accessToken: string, expiresInSeconds: number): void {
   const session = {
     email: user.email,
     name: user.name,
     loginTime: user.loginTime.toISOString(),
-    expiresAt: new Date(Date.now() + SESSION_DURATION).toISOString(),
+    accessToken,
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
   };
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+}
+
+/**
+ * Backend access token for the current session, or null if signed out / expired
+ */
+export function getAccessToken(): string | null {
+  try {
+    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!stored) return null;
+    const session = JSON.parse(stored);
+    if (!session.accessToken || new Date(session.expiresAt) < new Date()) return null;
+    return session.accessToken;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -122,8 +180,8 @@ export function getStoredSession(): User | null {
     const session = JSON.parse(stored);
     const expiresAt = new Date(session.expiresAt);
 
-    // Check if session has expired
-    if (expiresAt < new Date()) {
+    // Check if session has expired (sessions from before backend auth have no token)
+    if (expiresAt < new Date() || !session.accessToken) {
       clearSession();
       return null;
     }
@@ -163,16 +221,6 @@ export function isAuthenticated(): boolean {
 export function isValidWPIEmail(email: string): boolean {
   const wpiDomains = ['@wpi.edu', '@alumni.wpi.edu'];
   return wpiDomains.some(domain => email.toLowerCase().endsWith(domain));
-}
-
-/**
- * Generate a unique session ID for this user session
- */
-export function generateSessionId(email: string): string {
-  const timestamp = Date.now().toString(36);
-  const randomPart = Math.random().toString(36).substring(2, 10);
-  const emailHash = email.split('@')[0].substring(0, 4);
-  return `${emailHash}-${timestamp}-${randomPart}`;
 }
 
 /**

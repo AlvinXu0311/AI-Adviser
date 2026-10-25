@@ -78,9 +78,10 @@ class IntentAgent:
         
         try:
             logger.debug("Invoking LLM chain for intent classification (using thread executor)")
-            loop = asyncio.get_event_loop()
+            # to_thread (unlike run_in_executor) copies contextvars, so the LLM call nests
+            # under the chat turn's LangSmith trace
             llm_output = await asyncio.wait_for(
-                loop.run_in_executor(None, self._invoke_chain, message, context),
+                asyncio.to_thread(self._invoke_chain, message, context),
                 timeout=self.timeout,
             )
             logger.debug("LLM chain invocation completed")
