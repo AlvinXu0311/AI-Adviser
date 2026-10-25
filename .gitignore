@@ -163,3 +163,8 @@ frontend/.vscode
 .ruff_cache/
 .tunnel_pids
 deployment-urls.txt
+# TLS certificates (never commit private keys)
+certs/
+
+# Built vector index versions (rebuild with: python -m app.services.vector_index build)
+database/vector_index/

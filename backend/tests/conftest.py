@@ -18,6 +18,23 @@ from app.schemas.chat import TranscriptContext, ChatRequest, ChatResponse
 from datetime import date
 
 
+RUN_LIVE = os.getenv("RUN_LIVE_TESTS") == "1"
+if RUN_LIVE:
+    # Live tests use the real key from backend/.env
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests that call the real Gemini API unless explicitly requested (they cost money)."""
+    if RUN_LIVE:
+        return
+    skip = pytest.mark.skip(reason="calls the real Gemini API; run with RUN_LIVE_TESTS=1")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def event_loop():
     """Create an instance of the default event loop for each test case."""
@@ -122,7 +139,8 @@ def fake_redis():
     client = fakeredis.FakeRedis(decode_responses=True)
     memory = SimpleNamespace(redis_client=client)
     with patch("app.services.session_access.get_conversation_memory", return_value=memory), \
-            patch("app.services.rate_limit.get_conversation_memory", return_value=memory):
+            patch("app.services.rate_limit.get_conversation_memory", return_value=memory), \
+            patch("app.auth._redis", return_value=client):
         yield client
 
 

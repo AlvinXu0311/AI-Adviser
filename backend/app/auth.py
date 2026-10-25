@@ -2,21 +2,27 @@
 Authentication for the API.
 
 Every protected route depends on `get_current_user`, which accepts only access tokens this
-backend issued (HS256, signed with APP_JWT_SECRET). Clients get one by either:
+backend issued (HS256, signed with APP_JWT_SECRET). The browser receives the token as an
+HttpOnly, Secure, SameSite=Strict cookie, so page scripts (and any XSS) cannot read it;
+cookie-authenticated writes must also send `X-Requested-With` (CSRF guard). A Bearer header
+is accepted too, for API clients. Tokens are revocable: logout puts the token's jti on a
+Redis denylist until it would have expired. Clients get a token by either:
 - exchanging a Microsoft (Azure AD) ID token at /api/auth/microsoft, verified against the
   tenant's JWKS (signature, audience, issuer, tenant id, email domain), or
 - signing in with the demo account at /api/auth/demo-login, only when DEMO_LOGIN_ENABLED=true.
 """
+import asyncio
 import hmac
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import List, Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
@@ -24,6 +30,9 @@ logger = logging.getLogger(__name__)
 TOKEN_ALGORITHM = "HS256"
 TOKEN_ISSUER = "wpi-adviser"
 ADMIN_ROLE = "admin"
+COOKIE_NAME = "adviser_session"
+CSRF_HEADER = "X-Requested-With"
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -34,6 +43,8 @@ class User:
     email: str
     name: str
     roles: List[str] = field(default_factory=list)
+    token_id: str = ""
+    expires_at: int = 0
 
     @property
     def is_admin(self) -> bool:
@@ -63,6 +74,31 @@ def microsoft_login_enabled() -> bool:
     return bool(os.getenv("AZURE_CLIENT_ID") and os.getenv("AZURE_TENANT_ID"))
 
 
+def cookie_secure() -> bool:
+    # Secure cookies need HTTPS; browsers also accept them on http://localhost for development
+    return os.getenv("COOKIE_SECURE", "true").lower() != "false"
+
+
+def _redis():
+    from .services.conversation_memory import get_conversation_memory
+    return get_conversation_memory().redis_client
+
+
+def _revoked_key(token_id: str) -> str:
+    return f"revoked_token:{token_id}"
+
+
+def revoke_token(user: "User") -> None:
+    """Deny this token until its natural expiry (after that the signature check rejects it anyway)."""
+    remaining = user.expires_at - int(time.time())
+    if user.token_id and remaining > 0:
+        _redis().set(_revoked_key(user.token_id), "1", ex=remaining)
+
+
+def _is_revoked(token_id: str) -> bool:
+    return bool(token_id) and _redis().exists(_revoked_key(token_id)) > 0
+
+
 def _roles_for(email: str) -> List[str]:
     return [ADMIN_ROLE] if email.lower() in _env_list("ADMIN_EMAILS") else []
 
@@ -79,6 +115,7 @@ def create_access_token(email: str, name: str, subject: Optional[str] = None) ->
         "roles": _roles_for(email),
         "iat": now,
         "exp": now + token_ttl_seconds(),
+        "jti": uuid.uuid4().hex,
     }
     return jwt.encode(claims, _jwt_secret(), algorithm=TOKEN_ALGORITHM)
 
@@ -90,22 +127,34 @@ def decode_access_token(token: str) -> User:
             _jwt_secret(),
             algorithms=[TOKEN_ALGORITHM],
             issuer=TOKEN_ISSUER,
-            options={"require": ["exp", "iat", "sub", "iss"]},
+            options={"require": ["exp", "iat", "sub", "iss", "jti"]},
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token",
                             headers={"WWW-Authenticate": "Bearer"}) from exc
     return User(id=claims["sub"], email=claims.get("email", ""), name=claims.get("name", ""),
-                roles=list(claims.get("roles") or []))
+                roles=list(claims.get("roles") or []), token_id=claims["jti"], expires_at=claims["exp"])
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> User:
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    if credentials is not None and credentials.scheme.lower() == "bearer":
+        token = credentials.credentials
+    else:
+        token = request.cookies.get(COOKIE_NAME)
+        if token and request.method not in SAFE_METHODS and not request.headers.get(CSRF_HEADER):
+            # Cross-site forms can't set custom headers, and CORS blocks cross-origin scripts from it
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing CSRF header")
+    if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated",
                             headers={"WWW-Authenticate": "Bearer"})
-    return decode_access_token(credentials.credentials)
+    user = decode_access_token(token)
+    if await asyncio.to_thread(_is_revoked, user.token_id):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token has been revoked",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return user
 
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:

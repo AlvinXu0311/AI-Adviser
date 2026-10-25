@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1250 660" role="img" aria-label="System design: the browser loads the React build from the nginx frontend container, which proxies /api to the FastAPI backend container. The chat handler runs a sanity check, loads session state, classifies intent, and hands academic questions to the LangGraph adviser, whose tools use the search service over SQLite and ChromaDB in the database volume and the in-process ContextManager. Events stream back over SSE. Redis keeps chat history. The MCP server is a separate process that reuses the search service and database.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-label="System design: the browser talks HTTPS to an unprivileged nginx that terminates TLS, sends HSTS and a strict CSP, serves the React build, rate-limits sign-in and proxies /api to the FastAPI backend with SSE unbuffered; plain HTTP only redirects and answers ACME challenges, and in production a certbot container renews the certificate. The backend runs two stateless workers. Every request passes a body-size guard, cookie-JWT authentication with a CSRF header and revocation check, per-user rate limits and a session-ownership check. Chat goes through the intent agent, which retries and fails open, then the LangGraph adviser with a 120-second deadline that is cancelled if the client disconnects; its tools use the search service over SQLite and the active vector index version. Transcript uploads are validated, read by Gemini and sanitized before being stored encrypted. Admins build and activate vector index versions offline. Redis holds chat history, encrypted transcripts, session owners, rate-limit counters and revoked token ids. Traces go to LangSmith with PII redacted. The MCP server runs separately and reuses the search service.">
   <style>
     svg { --bg:#f6f7f9; --panel:#ffffff; --tint:#e9ecf1; --fg:#1a212b; --soft:#4a5464; --muted:#5f6a7a; --line:#c3cad5; --accent:#a3222e; }
     @media (prefers-color-scheme: dark) {
@@ -20,117 +20,157 @@
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
   </defs>
-  <rect class="bg" x="0" y="0" width="1250" height="660"/>
+  <rect class="bg" x="0" y="0" width="1280" height="760"/>
 
-  <!-- Gemini -->
-  <rect class="bx acc" x="400" y="16" width="520" height="40" rx="6"/>
-  <text class="t" x="660" y="41" text-anchor="middle"><tspan class="dia">◆</tspan> Gemini API · gemini-3.8-flash · embeddings</text>
+  <!-- External services -->
+  <rect class="bx acc" x="436" y="16" width="510" height="40" rx="6"/>
+  <text class="t" x="691" y="41" text-anchor="middle"><tspan class="dia">◆</tspan> Gemini API · gemini-3.8-flash · gemini-embedding-001</text>
+  <rect class="bx dash" x="976" y="16" width="288" height="40" rx="6"/>
+  <text class="t" x="1120" y="35" text-anchor="middle">LangSmith (optional)</text>
+  <text class="s" x="1120" y="50" text-anchor="middle">1 trace per turn · PII redacted</text>
 
-  <!-- regions -->
-  <rect class="region" x="210" y="90" width="160" height="470" rx="10"/>
-  <text class="rl" x="224" y="110">FRONTEND</text>
-  <text class="s" x="224" y="126">nginx :8080</text>
-  <rect class="region" x="400" y="90" width="520" height="470" rx="10"/>
-  <text class="rl" x="414" y="110">BACKEND</text>
-  <text class="s" x="414" y="126">FastAPI :8000</text>
-  <rect class="region" x="950" y="300" width="270" height="220" rx="10"/>
-  <text class="rl" x="964" y="322">./database VOLUME</text>
+  <!-- Regions -->
+  <rect class="region" x="186" y="90" width="220" height="530" rx="10"/>
+  <text class="rl" x="200" y="110">FRONTEND · NGINX (NON-ROOT)</text>
+  <text class="s" x="200" y="126">HTTPS :443 (dev :8443)</text>
+  <rect class="region" x="436" y="90" width="510" height="550" rx="10"/>
+  <text class="rl" x="450" y="110">BACKEND · FASTAPI × 2 WORKERS (STATELESS)</text>
+  <text class="s" x="450" y="126">:8000 on loopback only</text>
+  <rect class="region" x="976" y="90" width="288" height="240" rx="10"/>
+  <text class="rl" x="990" y="110">REDIS · PASSWORD, NO HOST PORT</text>
+  <rect class="region" x="976" y="350" width="288" height="290" rx="10"/>
+  <text class="rl" x="990" y="370">./database VOLUME</text>
 
   <!-- Browser -->
-  <rect class="bx" x="16" y="246" width="134" height="110" rx="6"/>
-  <text class="t" x="83" y="272" text-anchor="middle">Browser</text>
-  <text class="s" x="83" y="294" text-anchor="middle">React SPA</text>
-  <text class="s" x="83" y="312" text-anchor="middle">Azure AD sign-in</text>
-  <text class="s" x="83" y="330" text-anchor="middle">agent process view</text>
+  <rect class="bx" x="16" y="226" width="140" height="110" rx="6"/>
+  <text class="t" x="86" y="252" text-anchor="middle">Browser</text>
+  <text class="s" x="86" y="274" text-anchor="middle">React SPA</text>
+  <text class="s" x="86" y="292" text-anchor="middle">HttpOnly session</text>
+  <text class="s" x="86" y="308" text-anchor="middle">cookie (no token</text>
+  <text class="s" x="86" y="324" text-anchor="middle">in JS)</text>
+  <line class="ln" x1="156" y1="262" x2="196" y2="262" marker-end="url(#arr)"/>
+  <text class="lb" x="171" y="254" text-anchor="middle">TLS</text>
 
-  <!-- Frontend -->
-  <rect class="bx" x="226" y="150" width="128" height="50" rx="6"/>
-  <text class="t" x="290" y="171" text-anchor="middle">static build</text>
-  <text class="s" x="290" y="189" text-anchor="middle">React + Vite</text>
-  <rect class="bx" x="226" y="272" width="128" height="70" rx="6"/>
-  <text class="t" x="290" y="294" text-anchor="middle">/api proxy</text>
-  <text class="s" x="290" y="312" text-anchor="middle">→ backend:8000</text>
-  <text class="s" x="290" y="329" text-anchor="middle">SSE passthrough</text>
+  <!-- nginx column -->
+  <rect class="bx" x="198" y="142" width="196" height="74" rx="6"/>
+  <text class="t" x="296" y="164" text-anchor="middle">TLS 1.2/1.3 · HSTS</text>
+  <text class="s" x="296" y="184" text-anchor="middle">CSP script-src 'self'</text>
+  <text class="s" x="296" y="201" text-anchor="middle">no unsafe-inline</text>
+  <rect class="bx" x="198" y="232" width="196" height="58" rx="6"/>
+  <text class="t" x="296" y="255" text-anchor="middle">React build</text>
+  <text class="s" x="296" y="275" text-anchor="middle">Tailwind compiled</text>
+  <rect class="bx" x="198" y="306" width="196" height="74" rx="6"/>
+  <text class="t" x="296" y="328" text-anchor="middle">/api proxy</text>
+  <text class="s" x="296" y="348" text-anchor="middle">SSE unbuffered</text>
+  <text class="s" x="296" y="365" text-anchor="middle">login limit 10/min/IP</text>
+  <rect class="bx" x="198" y="396" width="196" height="58" rx="6"/>
+  <text class="t" x="296" y="419" text-anchor="middle">HTTP :80</text>
+  <text class="s" x="296" y="439" text-anchor="middle">301 → HTTPS · ACME</text>
+  <rect class="bx dash" x="198" y="530" width="196" height="58" rx="6"/>
+  <text class="t" x="296" y="553" text-anchor="middle">certbot (production)</text>
+  <text class="s" x="296" y="573" text-anchor="middle">renews · nginx reloads 6 h</text>
+  <line class="ln" x1="296" y1="530" x2="296" y2="456" marker-end="url(#arr)"/>
+  <text class="lb" x="304" y="497">webroot · certs</text>
 
-  <polyline class="ln" points="150,262 180,262 180,175 224,175" marker-end="url(#arr)"/>
-  <text class="lb" x="186" y="167">GET /</text>
-  <line class="ln" x1="150" y1="295" x2="224" y2="295" marker-end="url(#arr)"/>
-  <text class="lb" x="187" y="288" text-anchor="middle">/api/*</text>
-  <line class="ln" x1="226" y1="325" x2="152" y2="325" marker-end="url(#arr)"/>
-  <text class="lb" x="187" y="341" text-anchor="middle">SSE</text>
+  <!-- nginx -> backend (requests in, SSE events back) -->
+  <polyline class="ln" points="394,334 420,334 420,171 454,171" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text class="lb" x="412" y="252" text-anchor="middle" transform="rotate(-90 412 252)">/api · SSE events</text>
 
-  <!-- Chat handler column -->
-  <rect class="bx" x="420" y="140" width="180" height="36" rx="6"/>
-  <text class="t" x="510" y="163" text-anchor="middle">/api/chat · sanity check</text>
-  <line class="ln" x1="510" y1="176" x2="510" y2="194" marker-end="url(#arr)"/>
-  <rect class="bx" x="420" y="196" width="180" height="44" rx="6"/>
-  <text class="t" x="510" y="215" text-anchor="middle">load session</text>
-  <text class="s" x="510" y="232" text-anchor="middle">history · transcript</text>
-  <line class="ln" x1="510" y1="240" x2="510" y2="258" marker-end="url(#arr)"/>
-  <rect class="bx acc" x="420" y="260" width="180" height="44" rx="6"/>
-  <text class="t" x="510" y="279" text-anchor="middle"><tspan class="dia">◆</tspan> intent agent</text>
-  <text class="s" x="510" y="296" text-anchor="middle">academic? confidence</text>
-  <text class="s" x="510" y="322" text-anchor="middle">non-academic → canned reply</text>
-  <rect class="bx" x="420" y="420" width="180" height="44" rx="6"/>
-  <text class="t" x="510" y="439" text-anchor="middle">SSE event queue</text>
-  <text class="s" x="510" y="456" text-anchor="middle">asyncio.Queue</text>
-  <rect class="bx acc" x="420" y="496" width="180" height="44" rx="6"/>
-  <text class="t" x="510" y="515" text-anchor="middle"><tspan class="dia">◆</tspan> /api/transcript</text>
-  <text class="s" x="510" y="532" text-anchor="middle">PDF → ContextManager</text>
+  <!-- Request guards -->
+  <rect class="bx" x="456" y="142" width="220" height="58" rx="6"/>
+  <text class="t" x="566" y="165" text-anchor="middle">body-size guard</text>
+  <text class="s" x="566" y="185" text-anchor="middle">≤ ~14 MB, chunked too</text>
+  <line class="ln" x1="566" y1="200" x2="566" y2="210" marker-end="url(#arr)"/>
+  <rect class="bx" x="456" y="212" width="220" height="72" rx="6"/>
+  <text class="t" x="566" y="234" text-anchor="middle">authentication</text>
+  <text class="s" x="566" y="254" text-anchor="middle">JWT cookie · CSRF header</text>
+  <text class="s" x="566" y="271" text-anchor="middle">revoked-token check</text>
+  <line class="ln" x1="566" y1="284" x2="566" y2="294" marker-end="url(#arr)"/>
+  <rect class="bx" x="456" y="296" width="220" height="58" rx="6"/>
+  <text class="t" x="566" y="319" text-anchor="middle">rate limits</text>
+  <text class="s" x="566" y="339" text-anchor="middle">per user · login lockout</text>
+  <line class="ln" x1="566" y1="354" x2="566" y2="364" marker-end="url(#arr)"/>
+  <rect class="bx" x="456" y="366" width="220" height="58" rx="6"/>
+  <text class="t" x="566" y="389" text-anchor="middle">session ownership</text>
+  <text class="s" x="566" y="409" text-anchor="middle">other user's session → 403</text>
+  <polyline class="ln" points="676,395 691,395 691,171 704,171" marker-end="url(#arr)"/>
 
-  <polyline class="ln" points="354,290 385,290 385,158 418,158" marker-end="url(#arr)"/>
-  <polyline class="ln" points="260,342 260,518 418,518" marker-end="url(#arr)"/>
-  <polyline class="ln" points="420,442 320,442 320,344" marker-end="url(#arr)"/>
-  <text class="lb" x="372" y="436" text-anchor="middle">events</text>
+  <!-- Chat pipeline -->
+  <rect class="bx acc" x="706" y="142" width="220" height="58" rx="6"/>
+  <text class="t" x="816" y="165" text-anchor="middle"><tspan class="dia">◆</tspan> intent agent</text>
+  <text class="s" x="816" y="185" text-anchor="middle">retry once → fail open</text>
+  <line class="ln" x1="816" y1="200" x2="816" y2="210" marker-end="url(#arr)"/>
+  <rect class="bx acc" x="706" y="212" width="220" height="86" rx="6"/>
+  <text class="t" x="816" y="234" text-anchor="middle"><tspan class="dia">◆</tspan> LangGraph adviser</text>
+  <text class="s" x="816" y="254" text-anchor="middle">agent ⇄ 7 tools</text>
+  <text class="s" x="816" y="271" text-anchor="middle">120 s deadline</text>
+  <text class="s" x="816" y="288" text-anchor="middle">cancelled on disconnect</text>
+  <line class="ln" x1="816" y1="298" x2="816" y2="308" marker-end="url(#arr)"/>
+  <rect class="bx" x="706" y="310" width="220" height="58" rx="6"/>
+  <text class="t" x="816" y="333" text-anchor="middle">search_service</text>
+  <text class="s" x="816" y="353" text-anchor="middle">DB first → vectors → retry</text>
 
-  <!-- Agent + search column -->
-  <rect class="bx acc" x="630" y="200" width="270" height="100" rx="6"/>
-  <text class="t" x="765" y="230" text-anchor="middle"><tspan class="dia">◆</tspan> LangGraph adviser</text>
-  <text class="s" x="765" y="252" text-anchor="middle">agent ⇄ tools · 7 tools</text>
-  <text class="s" x="765" y="272" text-anchor="middle">details: agent design</text>
-  <line class="ln" x1="600" y1="282" x2="628" y2="282" marker-end="url(#arr)"/>
-  <polyline class="ln" points="640,300 640,442 602,442" marker-end="url(#arr)"/>
-  <text class="lb" x="621" y="460" text-anchor="middle">events</text>
+  <!-- Upload and admin -->
+  <rect class="bx acc" x="456" y="450" width="220" height="86" rx="6"/>
+  <text class="t" x="566" y="472" text-anchor="middle"><tspan class="dia">◆</tspan> /api/extract-transcript</text>
+  <text class="s" x="566" y="492" text-anchor="middle">PDF check → OCR</text>
+  <text class="s" x="566" y="509" text-anchor="middle">sanitize (untrusted)</text>
+  <text class="s" x="566" y="526" text-anchor="middle">→ encrypted in Redis</text>
+  <rect class="bx" x="706" y="450" width="220" height="86" rx="6"/>
+  <text class="t" x="816" y="472" text-anchor="middle">/api/admin · admin role</text>
+  <text class="s" x="816" y="492" text-anchor="middle">offline index build</text>
+  <text class="s" x="816" y="509" text-anchor="middle">validate → activate</text>
+  <text class="s" x="816" y="526" text-anchor="middle">rollback</text>
+  <rect class="bx dash" x="456" y="556" width="470" height="64" rx="6"/>
+  <text class="t" x="691" y="578" text-anchor="middle">every Gemini call</text>
+  <text class="s" x="691" y="598" text-anchor="middle">60 s timeout · 3 retries with backoff on 429 / 5xx</text>
+  <text class="s" x="691" y="613" text-anchor="middle">model never sees student name or ID</text>
 
-  <line class="ln" x1="780" y1="300" x2="780" y2="348" marker-end="url(#arr)"/>
-  <text class="lb" x="788" y="330">search tools</text>
-  <rect class="bx" x="660" y="350" width="240" height="60" rx="6"/>
-  <text class="t" x="780" y="374" text-anchor="middle">search_service.py</text>
-  <text class="s" x="780" y="394" text-anchor="middle">DB first → RAG → retry</text>
+  <!-- Backend -> external -->
+  <line class="ln" x1="816" y1="142" x2="816" y2="58" marker-end="url(#arr)"/>
+  <polyline class="ln dash" points="900,142 900,76 1120,76 1120,58" marker-end="url(#arr)"/>
+  <text class="lb" x="1010" y="70" text-anchor="middle">traces</text>
 
-  <!-- session reads -->
-  <polyline class="ln" points="600,210 615,210 615,74 1190,74 1190,198" marker-end="url(#arr)"/>
-  <line class="ln" x1="1050" y1="74" x2="1050" y2="98" marker-end="url(#arr)"/>
-  <text class="lb" x="860" y="68" text-anchor="middle">load session reads history · transcript</text>
+  <!-- Redis -->
+  <rect class="bx" x="990" y="124" width="260" height="192" rx="6"/>
+  <text class="t" x="1120" y="148" text-anchor="middle">Redis · all keys with TTL</text>
+  <text class="s" x="1006" y="174">chat history + rolling summary</text>
+  <text class="s" x="1006" y="196">transcripts · Fernet-encrypted</text>
+  <text class="s" x="1006" y="218">session owners</text>
+  <text class="s" x="1006" y="240">rate-limit counters</text>
+  <text class="s" x="1006" y="262">revoked token ids</text>
+  <text class="s" x="1006" y="290">read by auth, limits, ownership,</text>
+  <text class="s" x="1006" y="305">chat and tools</text>
+  <line class="ln" x1="926" y1="255" x2="988" y2="255" marker-end="url(#arr)"/>
+  <text class="lb" x="957" y="247" text-anchor="middle">state</text>
 
-  <!-- Data column -->
-  <rect class="bx" x="950" y="100" width="200" height="60" rx="6"/>
-  <text class="t" x="1050" y="124" text-anchor="middle">Redis :6379</text>
-  <text class="s" x="1050" y="144" text-anchor="middle">chat history · TTL 24 h</text>
-  <rect class="bx dash" x="950" y="200" width="270" height="62" rx="6"/>
-  <text class="t" x="1085" y="222" text-anchor="middle">ContextManager</text>
-  <text class="s" x="1085" y="240" text-anchor="middle">transcript per session</text>
-  <text class="s" x="1085" y="255" text-anchor="middle">in backend memory</text>
-  <line class="ln" x1="900" y1="232" x2="948" y2="232" marker-end="url(#arr)"/>
-  <text class="lb" x="924" y="224" text-anchor="middle">reads</text>
-
-  <rect class="bx" x="966" y="340" width="238" height="56" rx="6"/>
-  <text class="t" x="1085" y="362" text-anchor="middle">SQLite · bus_school.db</text>
-  <text class="s" x="1085" y="381" text-anchor="middle">programs · specialties · courses</text>
-  <rect class="bx" x="966" y="420" width="238" height="56" rx="6"/>
-  <text class="t" x="1085" y="442" text-anchor="middle">ChromaDB · vector_db_pdf</text>
-  <text class="s" x="1085" y="461" text-anchor="middle">PDF catalog chunks · 768-d</text>
-  <line class="ln" x1="900" y1="368" x2="964" y2="368" marker-end="url(#arr)"/>
-  <text class="lb" x="932" y="360" text-anchor="middle">first</text>
-  <polyline class="ln" points="900,398 930,398 930,448 964,448" marker-end="url(#arr)"/>
-  <text class="lb" x="926" y="432" text-anchor="end">fallback</text>
+  <!-- Database volume -->
+  <rect class="bx" x="990" y="384" width="260" height="52" rx="6"/>
+  <text class="t" x="1120" y="406" text-anchor="middle">SQLite · bus_school.db</text>
+  <text class="s" x="1120" y="425" text-anchor="middle">programs · specialties · courses</text>
+  <rect class="bx" x="990" y="448" width="260" height="104" rx="6"/>
+  <text class="t" x="1120" y="470" text-anchor="middle">vector_index/</text>
+  <text class="s" x="1006" y="492">versions/&lt;v&gt;/ + manifest</text>
+  <text class="s" x="1006" y="510">CURRENT → active version</text>
+  <text class="s" x="1006" y="528">workers switch within 5 s</text>
+  <text class="s" x="1006" y="546">old versions kept (rollback)</text>
+  <rect class="bx" x="990" y="564" width="260" height="56" rx="6"/>
+  <text class="t" x="1120" y="586" text-anchor="middle">catalog PDFs</text>
+  <text class="s" x="1120" y="605" text-anchor="middle">source for index builds</text>
+  <polyline class="ln" points="926,339 956,339 956,410 988,410" marker-end="url(#arr)"/>
+  <polyline class="ln" points="956,400 956,470 988,470" marker-end="url(#arr)"/>
+  <text class="lb" x="950" y="392" text-anchor="end">read</text>
+  <line class="ln" x1="926" y1="505" x2="988" y2="505" marker-end="url(#arr)"/>
+  <text class="lb" x="957" y="525" text-anchor="middle">build</text>
 
   <!-- MCP -->
-  <rect class="bx" x="950" y="560" width="270" height="50" rx="6"/>
-  <text class="t" x="1085" y="580" text-anchor="middle">MCP server · own process</text>
-  <text class="s" x="1085" y="598" text-anchor="middle">reuses search_service</text>
-  <line class="ln" x1="1085" y1="560" x2="1085" y2="522" marker-end="url(#arr)"/>
-  <line class="ln" x1="1085" y1="636" x2="1085" y2="612" marker-end="url(#arr)"/>
-  <text class="lb" x="1085" y="652" text-anchor="middle">Claude Code · Cursor · Dify</text>
-  <text class="lb" x="16" y="652"><tspan class="dia">◆</tspan> calls the Gemini API</text>
+  <rect class="bx" x="976" y="664" width="288" height="50" rx="6"/>
+  <text class="t" x="1120" y="684" text-anchor="middle">MCP server · own venv</text>
+  <text class="s" x="1120" y="702" text-anchor="middle">reuses search_service · read-only</text>
+  <line class="ln" x1="1120" y1="664" x2="1120" y2="642" marker-end="url(#arr)"/>
+  <text class="lb" x="1120" y="738" text-anchor="middle">Claude Code · Cursor · Dify</text>
+  <line class="ln" x1="1120" y1="726" x2="1120" y2="716" marker-end="url(#arr)"/>
+
+  <text class="lb" x="16" y="700"><tspan class="dia">◆</tspan> calls the Gemini API</text>
+  <text class="lb" x="16" y="720">dashed: production-only or optional</text>
 </svg>

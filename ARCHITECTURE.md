@@ -1,978 +1,188 @@
-# WPI Business School AI Adviser - System Architecture
+# Architecture
 
-> An intelligent academic advising chatbot powered by Google Gemini, LangChain, and RAG architecture
+This is the design reference behind the [README](README.md): how a request flows, where state
+lives, what each security control defends against, how the system behaves when a dependency fails,
+and why it is built this way. Diagrams: [system design](docs/diagrams/system-design.svg) and
+[agent design](docs/diagrams/agent-design.svg).
 
----
+## Goals
 
-## 📋 Table of Contents
+- **Correct answers from authoritative data.** Program and course facts come from SQLite; the PDF
+  catalogs only fill gaps. The agent may not invent courses.
+- **Safe with student records.** Transcripts are personal education records. They stay scoped to
+  their owner, are encrypted at rest, are not logged, and the model sees as little as possible.
+- **Operable.** Stateless application processes, every dependency with a timeout, rebuilds that
+  never take retrieval down, and traces that explain an answer.
 
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Technology Stack](#technology-stack)
-- [Data Flow](#data-flow)
-- [Component Details](#component-details)
-- [Database Schema](#database-schema)
-- [Deployment](#deployment)
-- [Security](#security)
+Non-goals: writing back to university systems, storing chat history beyond its TTL, or serving
+users outside the configured Azure AD tenant (except the opt-in demo account).
 
----
+## Components
 
-## 🎯 Overview
+| Component | Responsibility | Code |
+|-----------|----------------|------|
+| nginx (frontend container) | TLS, HSTS, CSP, static React build, `/api` proxy (SSE unbuffered), sign-in rate limit, ACME webroot, cert reload | `frontend/nginx/` |
+| FastAPI backend (2 workers) | Auth, guards, chat orchestration, transcript intake, admin | `backend/app/` |
+| Intent agent | Is the question academic? Retries, then fails open | `agents/intent_agent.py` |
+| LangGraph adviser | `agent ⇄ tools` loop with 7 tools, 8-round budget | `agents/adviser_agent.py`, `agents/tools.py` |
+| search_service | SQLite → vectors → query variations | `services/search_service.py` |
+| Vector index | Read-only serving with hot swap; offline versioned builds | `services/pdf_vector_service.py`, `services/vector_index.py` |
+| Redis | All mutable state (see [State model](#state-model)) | `services/conversation_memory.py`, `context_manager.py`, `session_access.py`, `rate_limit.py`, `auth.py` |
+| certbot (production) | Let's Encrypt issuance and renewal | `docker-compose.prod.yml`, `scripts/init-letsencrypt.sh` |
+| MCP server | Same retrieval for external MCP clients, read-only, own venv | `backend/mcp_server/` |
 
-The WPI Business School AI Adviser is a full-stack web application that provides intelligent academic advising to WPI students. It combines structured database queries with semantic search to answer questions about programs, courses, requirements, and personalized degree planning.
+## Request lifecycle: one chat turn
 
-### Key Features
+1. **Edge.** nginx terminates TLS and proxies `POST /api/chat` with buffering off. It overwrites
+   `X-Forwarded-For` with the client address it resolved (trusting only `TRUSTED_PROXY_CIDR`), so
+   clients cannot spoof their IP.
+2. **Body-size guard** (ASGI middleware). Rejects bodies over the limit from `Content-Length` and,
+   for chunked uploads, by counting bytes as they arrive (413).
+3. **Authentication.** Token from the `adviser_session` cookie (or a Bearer header). Cookie-based
+   writes must carry `X-Requested-With`; the token's signature, expiry and `jti` denylist are
+   checked (401 / 403).
+4. **Rate limits.** Per-user budgets: 10 chat turns per minute, 300 per day (429 with `Retry-After`).
+5. **Session ownership.** The session id is claimed by the first user who uses it (`SET NX`); any
+   other user gets 403.
+6. **Context.** Recent turns and the rolling summary from Redis; the encrypted transcript, if any.
+7. **Intent.** One LLM call; on failure one retry, then fail open as academic. Non-academic
+   questions get a canned reply and stop here.
+8. **Adviser.** The LangGraph run streams `agent_action`, `tool_start`, `tool_end`, `token` and
+   `agent_finish` events into an SSE queue. The whole run has a 120 s deadline; each Gemini call
+   has 60 s and up to 3 backoff retries.
+9. **Finish.** The answer is appended to history, latency recorded, a `final` event (with the
+   LangSmith `trace_id`) sent, and compaction scheduled in the background.
 
-- 🔐 **Secure Authentication** - Microsoft SSO with @wpi.edu domain validation
-- 💬 **Real-time Streaming** - Server-Sent Events (SSE) for live responses
-- 🤖 **AI Agent System** - LangGraph agent ⇄ tools graph with native Gemini tool calling
-- 📄 **PDF Processing** - Transcript upload and intelligent parsing
-- 🔍 **Hybrid Search** - Database-first with RAG fallback
-- 💾 **Conversation Memory** - Redis-backed chat history (24h retention)
-- 📊 **Degree Progress** - Automated graduation requirement checking
+If the browser disconnects at any point, Starlette closes the stream generator, whose `finally`
+cancels the agent task, so no further LLM calls are made for an abandoned turn.
 
----
+## Transcript intake
 
-## 🏗️ System Architecture
+1. Ownership of the target session is checked (403 before anything else).
+2. The upload must be valid base64 of a file starting with `%PDF-` and within `MAX_TRANSCRIPT_MB`.
+3. Gemini reads the PDF to text, then a second call structures it into JSON (both in worker
+   threads, with timeouts and retries; traced with sizes only).
+4. `sanitize_transcript` keeps only validated fields: course codes, grades and terms must match
+   strict patterns or are dropped; course and program names lose control and markup characters
+   and are length-capped; GPA and credits are range-checked; the raw OCR text is discarded.
+5. The result is stored Fernet-encrypted in Redis with the session TTL.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              USER LAYER                                  │
-│                                                                          │
-│                  WPI Students (@wpi.edu) via Browser                     │
-│                              ↓                                           │
-│                     Microsoft SSO Authentication                         │
-└──────────────────────────────────┬───────────────────────────────────────┘
-                                   ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          FRONTEND LAYER                                  │
-│                      React 19.2 + TypeScript + Vite                      │
-│                                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐  │
-│  │ ChatInterface│  │  PdfUpload   │  │   Sidebar   │  │    Header    │  │
-│  │  Component  │  │  Component   │  │  Component  │  │  Component   │  │
-│  └──────┬──────┘  └──────┬───────┘  └─────────────┘  └──────────────┘  │
-│         │                │                                               │
-│  ┌──────▼─────────────────▼───────────────┐                             │
-│  │         Service Layer                  │                             │
-│  │  • chatService.ts (SSE Streaming)      │                             │
-│  │  • pdfUpload.service.ts (File Upload)  │                             │
-│  │  • authService.ts (Session Mgmt)       │                             │
-│  └────────────────┬───────────────────────┘                             │
-│                   │                                                      │
-│  ┌────────────────▼───────────────────────┐                             │
-│  │      State Management (App.tsx)        │                             │
-│  │  • Session ID (sessionStorage)         │                             │
-│  │  • User Info (MSAL context)            │                             │
-│  │  • Chat History (local state)          │                             │
-│  └────────────────────────────────────────┘                             │
-└──────────────────────────────┬───────────────────────────────────────────┘
-                               ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          API GATEWAY                                     │
-│                      Nginx Reverse Proxy                                 │
-│                                                                          │
-│         • Port Forwarding: 8080 → 80                                     │
-│         • CORS Handling: Allowed Origins                                │
-│         • Routing: /api/* → Backend:8000                                │
-│         • Static Files: Frontend Build                                  │
-└──────────────────────────────┬───────────────────────────────────────────┘
-                               ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          BACKEND LAYER                                   │
-│                   FastAPI + Python 3.12 + LangChain                      │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      API Endpoints                                 │ │
-│  │                                                                    │ │
-│  │  POST   /api/chat                  - Streaming chat with AI       │ │
-│  │  POST   /api/extract-transcript    - PDF transcript processing    │ │
-│  │  GET    /api/chat/history/{id}     - Conversation history         │ │
-│  │  DELETE /api/chat/history/{id}     - Clear conversation           │ │
-│  │  GET    /api/status                - System health check          │ │
-│  │  GET    /api/summary               - Session summary              │ │
-│  │  POST   /api/admin/*               - Admin operations             │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                  AI Agent System (LangGraph)                       │ │
-│  │                                                                    │ │
-│  │  ┌──────────────────┐         ┌────────────────────────────────┐  │ │
-│  │  │  Intent Agent    │         │      Adviser Agent             │  │ │
-│  │  │  (Gemini Flash)  │────────>│      (Gemini Flash)            │  │ │
-│  │  │                  │         │                                │  │ │
-│  │  │  • Classify      │         │  • agent ⇄ tools (≤8 rounds)   │  │ │
-│  │  │  • Validate      │         │  • Multi-tool orchestration    │  │ │
-│  │  │  • Filter noise  │         │  • Context-aware reasoning     │  │ │
-│  │  └──────────────────┘         └────────────┬───────────────────┘  │ │
-│  │                                             │                      │ │
-│  │                               ┌─────────────▼───────────────┐      │ │
-│  │                               │      Agent Tools (7)        │      │ │
-│  │                               │                             │      │ │
-│  │                               │  1. smart_course_search     │      │ │
-│  │                               │  2. program_search          │      │ │
-│  │                               │  3. degree_progress         │      │ │
-│  │                               │  4. student_context         │      │ │
-│  │                               │  5. semantic_search         │      │ │
-│  │                               │  6. business_school_database│      │ │
-│  │                               │  7. pdf_context             │      │ │
-│  │                               └─────────────────────────────┘      │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                        Core Services                               │ │
-│  │                                                                    │ │
-│  │  • LLM Service          - Google Gemini API integration           │ │
-│  │  • Context Manager      - Session-based student data storage      │ │
-│  │  • Conversation Memory  - Redis-backed chat history               │ │
-│  │  • PDF Extraction       - PyMuPDF text extraction + parsing       │ │
-│  │  • Vector Service       - ChromaDB semantic search                │ │
-│  │  • Database Service     - SQLite query interface                  │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────┬───────────────────────────────────────────┘
-                               ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            DATA LAYER                                    │
-│                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────────┐   │
-│  │  SQLite Database │  │  ChromaDB        │  │  Redis Cache        │   │
-│  │  (bus_school.db) │  │  (Vector Store)  │  │  (Port 6379)        │   │
-│  │                  │  │                  │  │                     │   │
-│  │  • programs      │  │  • PDF Chunks    │  │  • Sessions (24h)   │   │
-│  │  • courses       │  │  • Embeddings    │  │  • Chat History     │   │
-│  │  • requirements  │  │  • Metadata      │  │  • Student Context  │   │
-│  │  • specializations│ │  • 4 PDF Files   │  │  • TTL Management   │   │
-│  │  • course_offerings││  500+ chunks     │  │  • LRU Eviction     │   │
-│  └──────────────────┘  └──────────────────┘  └─────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-                               ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       EXTERNAL SERVICES                                  │
-│                                                                          │
-│  • Google Gemini API (gemini-3.8-flash, set by GEMINI_MODEL)             │
-│  • Google Embeddings API (embedding-001)                                │
-│  • Microsoft Azure AD B2C (OAuth 2.0 Authentication)                    │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+## State model
 
----
+All mutable state is in Redis, which has a password, no host port and `maxmemory` with
+`volatile-lru` eviction. Every key has a TTL.
 
-## 🛠️ Technology Stack
+| Key | Content | TTL | Written by |
+|-----|---------|-----|------------|
+| `message_store:{session}` | Chat messages | 24 h, refreshed | chat |
+| `chat_summary:{session}` | Rolling summary of compacted turns | 24 h | compaction |
+| `chat_compaction_lock:{session}` | Single-writer lock for compaction | 60 s | compaction |
+| `student_context:{session}` | Sanitized transcript, Fernet-encrypted | 24 h, sliding | transcript intake |
+| `session_owner:{session}` | Owning user id | 24 h, refreshed | first use of a session |
+| `revoked_token:{jti}` | Denylisted token | until the token's expiry | logout |
+| `ratelimit:{scope}:{user}` | Fixed-window counter | window length | rate limiter |
+| `ratelimit:login-fail:{email\|ip}:…` | Failed demo logins | lockout length | demo login |
+| `metrics:chat_latency_ms` | Recent end-to-end latencies | none (capped list) | chat |
 
-### Frontend
-```
-React 19.2.1           - UI Framework
-TypeScript             - Type Safety
-Vite 6.2.0             - Build Tool (fast HMR)
-Framer Motion 12.23    - Smooth Animations
-MSAL Browser 4.27      - Microsoft Authentication
-MSAL React 3.0         - React Integration
-React Markdown 10.1    - Message Rendering
-Lucide React 0.554     - Icon System
-jsPDF 3.0              - PDF Generation
-```
+Read-only data lives in the `./database` volume: `bus_school.db`, the catalog PDFs and
+`vector_index/` (versions plus the `CURRENT` pointer).
 
-### Backend
-```
-FastAPI 0.111          - Async Web Framework
-Uvicorn 0.29           - ASGI Server
-Python 3.12            - Runtime Environment
-LangGraph 1.x          - Agent Framework
-LangChain Core 1.x     - Messages, tools, prompts
-LangChain Google GenAI - Gemini Integration
-Pydantic 2.8           - Data Validation
-Python-dotenv 1.0      - Environment Config
-HTTPX 0.27             - HTTP Client
-Python-multipart 0.0.9 - File Upload Support
-```
+## Security model
 
-### AI & ML
-```
-Google Gemini 3.8-flash  - Adviser agent (thinking_level=medium)
-Google Gemini 3.8-flash  - Intent Classifier (thinking_level=low)
-Google Embeddings API    - embedding-001
-ChromaDB 1.3.5           - Vector Database
-Sentence Transformers 2.7 - Local Embeddings (fallback)
-PyMuPDF 1.24             - PDF Text Extraction
-```
+| Threat | Control |
+|--------|---------|
+| Unauthenticated access to the API or admin operations | Backend-issued JWTs on every route but health and sign-in; admin routes need a role from `ADMIN_EMAILS` |
+| Forged identity from Azure AD | ID token verified against the tenant JWKS: signature, `aud`, `iss`, `tid`, email domain |
+| Token theft through XSS | Token only in an HttpOnly cookie; strict CSP (`script-src 'self'`, no inline script or style, no eval) |
+| CSRF | SameSite=Strict cookie plus a required custom header on cookie-authenticated writes |
+| Stolen token after logout | `jti` denylist in Redis until expiry |
+| Reading or deleting another user's chat (IDOR) | Sessions bound to their owner; random UUID ids |
+| Student data leaking | Encrypted at rest, raw OCR text dropped, counts-only logging, model never given name or ID, redacting LangSmith client |
+| Prompt injection via a crafted PDF | Field validation at storage, untrusted-data fence, system-prompt rule; tools are read-only and session-scoped |
+| Cost and abuse | Per-user budgets, login lockout per email and IP, nginx sign-in limit, body caps |
+| Network exposure | TLS only (HTTP redirects); Redis and the backend not reachable from outside; X-Forwarded-* trusted only from nginx's fixed IP |
+| Container escape impact | Non-root users, `no-new-privileges`, resource limits, no secrets in images |
 
-### Data & Storage
-```
-SQLite 3               - Primary Database (structured data)
-Redis 5.0              - Cache & Session Store
-Redis Python Client    - Redis Driver
-ChromaDB Persistent    - Vector Storage
-```
-
-### DevOps & Deployment
-```
-Docker Compose         - Multi-container Orchestration
-Nginx                  - Reverse Proxy + Static Files
-Alpine Linux           - Lightweight Container Base
-Health Checks          - Automatic Service Monitoring
-Bridge Network         - Inter-container Communication
-Named Volumes          - Data Persistence
-```
-
----
-
-## 🔄 Data Flow
-
-### 1. Chat Request Flow
+## Vector index lifecycle
 
 ```
-User Input
-   ↓
-Frontend (React)
-   ↓ POST /api/chat {message, session_id, topic_id}
-Nginx Proxy
-   ↓
-FastAPI Backend
-   ↓
-┌────────────────────────────────────────────────────┐
-│ Layer 1: Basic Sanity Check                       │
-│  • Not empty                                       │
-│  • Contains alphanumeric                           │
-└────────────────────┬───────────────────────────────┘
-                     ↓
-┌────────────────────────────────────────────────────┐
-│ Layer 2: Intent Classification                     │
-│  • Fetch conversation history (Redis)              │
-│  • Intent Agent (Gemini Flash) analyzes            │
-│  • Returns: {intent, confidence, is_academic}      │
-│  • Reject if not academic or confidence < 0.2      │
-└────────────────────┬───────────────────────────────┘
-                     ↓
-┌────────────────────────────────────────────────────┐
-│ Context Loading                                    │
-│  • Get student context from Redis (if uploaded)    │
-│  • Get conversation history (last 20 messages)     │
-│  • Get topic guidance (general vs course)          │
-└────────────────────┬───────────────────────────────┘
-                     ↓
-┌────────────────────────────────────────────────────┐
-│ Adviser Agent (LangGraph: agent ⇄ tools)           │
-│                                                    │
-│  Rounds 1-8:                                       │
-│    agent node: Gemini returns tool_calls           │
-│       ↓                                            │
-│    tools node: smart_course_search (parallel ok)   │
-│       ↓                                            │
-│    Tool Execution:                                 │
-│      1. Try DB query (SQLite)                      │
-│      2. Try RAG search (ChromaDB)                  │
-│      3. Retry with query variations                │
-│       ↓                                            │
-│    ToolMessage: "Found course MIS 520..."          │
-│       ↓                                            │
-│    agent node: no tool_calls → answer              │
-│       ↓                                            │
-│    END: streamed final response                   │
-└────────────────────┬───────────────────────────────┘
-                     ↓
-┌────────────────────────────────────────────────────┐
-│ Response Processing                                │
-│  • Store messages in Redis (conversation history)  │
-│  • Stream response via SSE                         │
-│  • Refresh TTL (24h)                               │
-└────────────────────┬───────────────────────────────┘
-                     ↓
-Frontend Displays Response
+database/vector_index/
+├── CURRENT                         "20261025T183755Z-9e03"
+└── versions/
+    ├── 20261025T183018Z/           previous (rollback target)
+    └── 20261025T183755Z-9e03/
+        ├── chroma.sqlite3 …
+        └── manifest.json           embedding_type, embedding_model, embedding_dims,
+                                    total_chunks, chunks_per_file, sources_sha256, validation
 ```
 
-### 2. Transcript Upload Flow
-
-```
-User Selects PDF
-   ↓
-Frontend Validation
-  • File type: PDF
-  • Size: < 10MB
-   ↓
-POST /api/extract-transcript
-   ↓
-PDF Extraction Service (PyMuPDF)
-  • Extract text from PDF
-  • Parse with regex patterns:
-    - Student name, ID, email
-    - GPA calculation
-    - Course list (code, name, credits, grade)
-    - Current courses
-   ↓
-Context Manager
-  • Create StudentContext object
-  • Store in Redis with session_id
-  • TTL: 24 hours
-   ↓
-Response to Frontend
-  {student_name, gpa, courses_count}
-   ↓
-Context Available for Tools
-  • degree_progress tool
-  • student_context tool
-  • Personalized recommendations
-```
-
-### 3. Unified Search Strategy (Used by Multiple Tools)
-
-```
-Query: "Who teaches MIS 520?"
-   ↓
-┌─────────────────────────────────────┐
-│ Attempt 1: Database Search          │
-│  • Query SQLite courses table       │
-│  • Check course_offerings for instructor │
-│  • Validate result matches query    │
-└─────────┬───────────────────────────┘
-          ↓
-     Found? ──Yes──> Return DB Result
-          │
-          No
-          ↓
-┌─────────────────────────────────────┐
-│ Attempt 2: RAG Search               │
-│  • Generate query embedding         │
-│  • Search ChromaDB vector store     │
-│  • Course-aware ranking (boost)     │
-│  • Check relevance score > 0.5      │
-└─────────┬───────────────────────────┘
-          ↓
-     Found? ──Yes──> Return RAG Result
-          │
-          No
-          ↓
-┌─────────────────────────────────────┐
-│ Attempt 3: Query Variations         │
-│  • Generate keyword variations      │
-│  • Try DB search again              │
-│  • Try RAG search again             │
-│  • Cross-department queries         │
-└─────────┬───────────────────────────┘
-          ↓
-     Found? ──Yes──> Return Best Match
-          │
-          No
-          ↓
-    Return "No information found"
-```
-
----
-
-## 🧩 Component Details
-
-### Frontend Components
-
-#### ChatInterface (`ChatInterface.tsx`)
-- **Purpose**: Main chat UI with real-time message streaming
-- **Features**:
-  - Message history display with Markdown rendering
-  - SSE streaming client (receives chunks from backend)
-  - Topic selection (General Advising vs Courses & Planning)
-  - Auto-scroll to latest message
-  - Loading states and error handling
-- **State Management**: Local state + App.tsx context
-
-#### PdfUpload (`PdfUpload.tsx`)
-- **Purpose**: Transcript upload and validation
-- **Features**:
-  - Drag-and-drop + file picker
-  - Client-side validation (PDF only, < 10MB)
-  - Upload progress indicator
-  - Display extracted info (name, GPA, course count)
-- **API**: POST /api/extract-transcript
-
-#### Sidebar (`Sidebar.tsx`)
-- **Purpose**: Navigation and resource links
-- **Features**:
-  - Program information links
-  - Course catalog access
-  - Student resources
-  - Collapsible on mobile
-
-### Backend Services
-
-#### Intent Agent (`intent_agent.py`)
-- **Purpose**: Classify user intent before processing
-- **Model**: Gemini 3.8-flash, thinking_level=low (fast, low-cost)
-- **Input**: User message + last 6 conversation messages
-- **Output**: `{intent, confidence, is_academic, requires_transcript, reasoning}`
-- **Timeout**: 6 seconds
-- **Logic**:
-  ```python
-  if not is_academic or confidence < 0.2:
-      return "Not sure how to help with that..."
-  else:
-      route_to_adviser_agent()
-  ```
-
-#### Adviser Agent (`adviser_agent.py`)
-- **Purpose**: Main academic advising agent
-- **Model**: Gemini 3.8-flash, thinking_level=medium (thought summaries feed the UI)
-- **Pattern**: LangGraph `StateGraph` (agent ⇄ ToolNode) with native tool calling
-- **Tools**: 7 tools available (see below)
-- **Max Iterations**: 10
-- **Features**:
-  - Multi-step reasoning
-  - Autonomous tool selection
-  - Context-aware responses
-  - Conversation history integration (last 20 messages)
-
-#### Agent Tools (`tools.py`)
-
-| Tool | Purpose | Data Source | Strategy |
-|------|---------|-------------|----------|
-| `smart_course_search` | Course info (instructor, credits, description) | SQLite + ChromaDB | DB-first, RAG fallback, 3 retries |
-| `program_search` | Program requirements, specializations | SQLite + ChromaDB | DB-first, RAG fallback |
-| `degree_progress` | Graduation requirement checking | SQLite + Redis | Compare completed vs required |
-| `student_context` | Student GPA, courses, grades | Redis cache | Direct lookup by session_id |
-| `semantic_search` | General fallback search | ChromaDB | Semantic similarity |
-| `business_school_database` | Direct SQL queries | SQLite | Raw database access |
-| `pdf_context` | Long-form context retrieval | ChromaDB | Multi-chunk aggregation |
-
-#### Context Manager (`context_manager.py`)
-- **Purpose**: Session-based student data storage
-- **Storage**: Redis (24h TTL)
-- **Isolation**: Each session_id has separate context
-- **Features**:
-  - Auto-expiration (24h inactivity)
-  - LRU eviction (max 1000 sessions)
-  - Touch-on-access (TTL refresh)
-  - No cross-session data leakage
-
-#### Conversation Memory (`conversation_memory.py`)
-- **Purpose**: Multi-turn conversation support
-- **Storage**: Redis (LangChain RedisChatMessageHistory)
-- **Key Pattern**: `message_store:{session_id}`
-- **Retention**: 24h TTL, max 100 messages per session
-- **Pruning**: Auto-remove oldest messages when limit reached
-
-#### PDF Extraction Service (`pdf_extraction_service.py`)
-- **Purpose**: Parse student transcripts
-- **Library**: PyMuPDF (fitz)
-- **Extraction**:
-  - Text extraction (page by page)
-  - Regex patterns for structured data:
-    - Student info: name, ID, email
-    - GPA: cumulative GPA calculation
-    - Courses: code, name, credits, grade, semester
-    - Current courses: in-progress courses
-- **Output**: `ExtractedTranscriptData` object
-
-#### PDF Vector Service (`pdf_vector_service.py`)
-- **Purpose**: Semantic search across academic PDFs
-- **PDFs Indexed**:
-  - Bus-school courses.pdf
-  - Masters from Graduate Bus School.pdf
-  - Mathematical Science Courses.pdf
-  - Computer Science Courses.pdf
-- **Chunking Strategy**:
-  - Course-boundary splitting (regex: `[A-Z]{2,4} \d{3,4}`)
-  - Each chunk = complete course info
-  - Overlapping chunks for long descriptions
-- **Embeddings**: Google embedding-001 (fallback: all-MiniLM-L6-v2)
-- **Search Features**:
-  - Course-aware ranking (boost score for exact matches)
-  - Cross-listed course detection (e.g., "DS/ECE 577")
-  - Relevance threshold: 0.5
-
-#### Program Database Service (`program_db_service.py`)
-- **Purpose**: Query SQLite database for programs/courses
-- **Key Functions**:
-  - `get_all_programs()` - List all programs (MSIT, MSBA, MBA, etc.)
-  - `summarize_courses(query)` - Search courses by keyword
-  - `summarize_programs(query)` - Search programs by keyword
-  - `compare_student_progress(program, completed, current)` - Degree progress check
-  - `format_progress_report(analysis)` - Human-readable report
-
----
-
-## 🗄️ Database Schema
-
-### SQLite Database (`bus_school.db`)
-
-```sql
--- Programs Table
-CREATE TABLE programs (
-    program_id INTEGER PRIMARY KEY,
-    program_code TEXT UNIQUE NOT NULL,  -- 'MSIT', 'MSBA', 'MBA'
-    program_name TEXT NOT NULL,
-    total_credits INTEGER,              -- 30-48 credits
-    description TEXT,
-    admission_requirements TEXT
-);
-
--- Specializations Table
-CREATE TABLE specializations (
-    specialization_id INTEGER PRIMARY KEY,
-    program_id INTEGER,
-    name TEXT NOT NULL,                 -- 'AI/ML', 'Data Analytics'
-    credits_required INTEGER,
-    description TEXT,
-    FOREIGN KEY (program_id) REFERENCES programs(program_id)
-);
-
--- Requirements Table
-CREATE TABLE requirements (
-    requirement_id INTEGER PRIMARY KEY,
-    program_id INTEGER,
-    specialization_id INTEGER,          -- NULL for core requirements
-    requirement_type TEXT,              -- 'core', 'elective', 'capstone'
-    course_code TEXT,
-    credits_required INTEGER,
-    is_mandatory BOOLEAN,
-    FOREIGN KEY (program_id) REFERENCES programs(program_id),
-    FOREIGN KEY (specialization_id) REFERENCES specializations(specialization_id),
-    FOREIGN KEY (course_code) REFERENCES courses(course_code)
-);
-
--- Courses Table
-CREATE TABLE courses (
-    course_code TEXT PRIMARY KEY,       -- 'MIS 520'
-    course_name TEXT NOT NULL,
-    credits REAL,                       -- 3.0
-    description TEXT,
-    prerequisites TEXT,
-    department TEXT                     -- 'MIS', 'OIE', 'CS'
-);
-
--- Course Offerings Table
-CREATE TABLE course_offerings (
-    offering_id INTEGER PRIMARY KEY,
-    course_code TEXT,
-    instructor TEXT,
-    semester TEXT,                      -- 'A-term', 'B-term'
-    year TEXT,                          -- '2024-25'
-    schedule TEXT,                      -- 'Mon/Wed 6-7:30pm'
-    enrollment_limit INTEGER,
-    FOREIGN KEY (course_code) REFERENCES courses(course_code)
-);
-```
-
-### ChromaDB Collections
-
-```
-Collection: pdf_documents
-  • Total Chunks: ~500
-  • Embedding Dimensions: 768 (Google) or 384 (local)
-  • Metadata:
-    - source: PDF filename
-    - course_code: Extracted course code
-    - course_title: Extracted course title
-    - chunk_type: 'course', 'program_info', 'sub_chunk'
-    - chunk_index: Position in source document
-```
-
-### Redis Data Structure
-
-```
-Key Pattern: message_store:{session_id}
-  Type: List (LPUSH/RPUSH for messages)
-  Value: JSON serialized messages
-    [
-      {"type": "human", "content": "What is MSIT?"},
-      {"type": "ai", "content": "MSIT is..."}
-    ]
-  TTL: 86400 seconds (24 hours)
-  Max Messages: 100 per session
-
-Key Pattern: student_context:{session_id}
-  Type: Hash
-  Value: Student transcript data
-    {
-      "student_name": "John Doe",
-      "gpa": 3.75,
-      "courses": [...],
-      "degree_program": "MSIT"
-    }
-  TTL: 86400 seconds (24 hours)
-```
-
----
-
-## 🐳 Deployment
-
-### Docker Compose Architecture
-
-```yaml
-services:
-  frontend:
-    image: nginx:alpine
-    ports:
-      - "8080:80"
-    volumes:
-      - ./frontend/dist:/usr/share/nginx/html
-    networks:
-      - ai-adviser-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  backend:
-    build: ./backend
-    image: wpi-ai-adviser-backend:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    volumes:
-      - ./database:/app/database
-    networks:
-      - ai-adviser-network
-    depends_on:
-      - redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - ai-adviser-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-networks:
-  ai-adviser-network:
-    driver: bridge
-
-volumes:
-  redis_data:
-```
-
-### Environment Variables
-
-```bash
-# Backend (.env)
-GOOGLE_API_KEY=your_google_api_key_here
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_SESSION_TTL=86400
-LANGCHAIN_DEBUG=false
-LOG_LEVEL=INFO
-FRONTEND_URL=http://localhost:8080
-ALLOW_ALL_ORIGINS=false
-
-# Frontend (.env)
-VITE_API_URL=http://localhost:8000
-VITE_MSAL_CLIENT_ID=your_azure_client_id
-VITE_MSAL_AUTHORITY=https://login.microsoftonline.com/your_tenant_id
-VITE_MSAL_REDIRECT_URI=http://localhost:8080
-```
-
-### Deployment Steps
-
-```bash
-# 1. Clone repository
-git clone https://github.com/your-org/ai-adviser.git
-cd ai-adviser
-
-# 2. Set up environment variables
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-# Edit .env files with your credentials
-
-# 3. Build frontend
-cd frontend
-npm install
-npm run build
-cd ..
-
-# 4. Start services
-docker-compose up -d
-
-# 5. Check health
-curl http://localhost:8000/api/health
-curl http://localhost:8080
-
-# 6. View logs
-docker-compose logs -f backend
-```
-
----
-
-## 🔒 Security
-
-### Authentication & Authorization
-
-- **Microsoft SSO**: Only users with @wpi.edu email addresses can authenticate
-- **OAuth 2.0**: Industry-standard authentication protocol via MSAL
-- **Token Management**: MSAL automatically refreshes access tokens
-- **Session Isolation**: Each browser session has a unique session_id (UUID)
-- **No Persistent Storage**: User credentials never stored locally
-
-### Data Privacy
-
-- **Session-Based Storage**: All student data isolated by session_id
-- **Auto-Expiration**: All data automatically deleted after 24h of inactivity
-- **Redis TTL**: Automatic cleanup via Redis key expiration
-- **No Cross-Session Leakage**: Context Manager enforces strict isolation
-- **Transcript Security**: Uploaded transcripts stored in memory (Redis), not on disk
-- **No PII Logging**: Student names, IDs, and grades not logged
-
-### Network Security
-
-- **CORS**: Whitelist of allowed origins (localhost + production domains)
-- **Nginx Proxy**: Backend not directly exposed to public internet
-- **HTTPS Support**: SSL/TLS certificates for production deployment
-- **Rate Limiting**: Gemini API enforces 60 requests/minute
-- **Input Validation**: Pydantic schemas validate all API inputs
-- **Sanity Checks**: Basic validation before expensive LLM calls
-
-### Container Security
-
-- **Alpine Base Images**: Minimal attack surface (5MB base image)
-- **Bridge Network**: Containers isolated from host network
-- **Non-Root Users**: Containers run as unprivileged users
-- **Health Checks**: Automatic restart on service failure
-- **Environment Variables**: Secrets managed via .env files (not in code)
-- **Volume Permissions**: Restricted access to mounted volumes
-
----
-
-## 📊 Performance Metrics
-
-### Response Times
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Intent Classification | 1-2s | Gemini Flash, 6s timeout |
-| Simple Query (1-2 tools) | 3-5s | Database lookup |
-| Complex Query (3-5 tools) | 8-15s | Multiple tool calls |
-| Degree Progress Check | 5-10s | Database comparison |
-| PDF Upload & Extraction | 2-5s | PyMuPDF processing |
-| SSE Stream First Chunk | <1s | Perceived latency low |
-
-### Scalability Limits
-
-- **Max Concurrent Sessions**: 1000 (Context Manager limit)
-- **Redis Memory Usage**: ~100MB for 1000 active sessions
-- **ChromaDB Size**: ~50MB (4 PDFs, 500 chunks)
-- **SQLite Database**: ~10MB (programs, courses, requirements)
-- **Gemini API Rate Limit**: 60 requests/minute (free tier)
-
-### Optimization Techniques
-
-1. **Streaming Responses**: SSE reduces perceived latency
-2. **DB-First Search**: Avoids slow vector search when possible
-3. **Query Retry Logic**: 3 attempts with variations (improves recall by 40%)
-4. **Batch Embedding**: 50 documents at a time (prevents OOM)
-5. **Course-Aware Ranking**: Boosts relevant results by 30%
-6. **LRU Eviction**: Automatic cleanup of oldest 10% when limit reached
-7. **Redis Pipelining**: Batch operations for better throughput
-
----
-
-## 🎯 Architecture Decisions
-
-### Why Database-First?
-
-- **Accuracy**: SQLite provides authoritative, structured data (instructor names, credits, schedules)
-- **Speed**: SQL queries are 10x faster than vector search (50ms vs 500ms)
-- **Reliability**: Database data is validated and curated
-- **RAG Supplement**: ChromaDB supplements with detailed descriptions from PDFs
-
-### Why ReAct Pattern?
-
-- **Autonomous Reasoning**: Agent decides which tools to use and when
-- **Multi-Step Queries**: Handles complex questions requiring multiple data sources
-- **Explainability**: "Thought" and "Action" steps visible in logs
-- **Flexibility**: Easy to add new tools without changing core logic
-
-### Why Intent Classification?
-
-- **Cost Reduction**: Prevents expensive LLM calls for non-academic queries
-- **User Experience**: Fast rejection of irrelevant questions
-- **Conversation Context**: Uses chat history to understand follow-up questions
-- **Accuracy**: 95%+ accuracy on academic vs non-academic classification
-
-### Why Session-Based Isolation?
-
-- **Privacy**: Each user's data isolated from others
-- **Security**: No shared state between sessions
-- **Scalability**: Easy to distribute across multiple backend instances
-- **Simplicity**: No need for user database or authentication state
-
-### Why Redis for Memory?
-
-- **Speed**: In-memory storage (< 1ms read/write)
-- **TTL Support**: Automatic expiration (no manual cleanup)
-- **Persistence**: Optional disk persistence for reliability
-- **Compatibility**: LangChain native support (RedisChatMessageHistory)
-
----
-
-## 📁 Project Structure
-
-```
-AI-Adviser/
-├── frontend/                   # React Frontend
-│   ├── src/
-│   │   ├── components/        # React Components
-│   │   │   ├── ChatInterface.tsx
-│   │   │   ├── PdfUpload.tsx
-│   │   │   ├── Sidebar.tsx
-│   │   │   └── Header.tsx
-│   │   ├── services/          # API Services
-│   │   │   ├── chatService.ts
-│   │   │   ├── pdfUpload.service.ts
-│   │   │   └── authService.ts
-│   │   ├── App.tsx            # Main App Component
-│   │   └── main.tsx           # Entry Point
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── backend/                    # FastAPI Backend
-│   ├── app/
-│   │   ├── api/               # API Endpoints
-│   │   │   ├── chat.py
-│   │   │   ├── transcript.py
-│   │   │   ├── status.py
-│   │   │   ├── summary.py
-│   │   │   └── admin.py
-│   │   ├── agents/            # AI Agents
-│   │   │   ├── adviser_agent.py
-│   │   │   ├── intent_agent.py
-│   │   │   └── tools.py
-│   │   ├── services/          # Core Services
-│   │   │   ├── context_manager.py
-│   │   │   ├── conversation_memory.py
-│   │   │   ├── pdf_extraction_service.py
-│   │   │   ├── pdf_vector_service.py
-│   │   │   └── program_db_service.py
-│   │   ├── schemas/           # Pydantic Models
-│   │   │   ├── chat.py
-│   │   │   └── transcript.py
-│   │   └── main.py            # FastAPI App
-│   ├── tests/                 # Unit Tests
-│   │   ├── test_adviser_graph.py
-│   │   └── test_pdf_extraction_service.py
-│   ├── requirements.txt
-│   └── Dockerfile
-│
-├── database/                   # Database Files
-│   ├── database_project/      # SQLite Database
-│   │   ├── bus_school.db
-│   │   ├── create_database.py
-│   │   └── query_degree.py
-│   └── vector_db_pdf/         # ChromaDB Storage
-│       └── chroma.sqlite3
-│
-├── docker-compose.yml          # Docker Orchestration
-├── .env.example                # Environment Template
-├── README.md                   # Project README
-└── ARCHITECTURE.md             # This File
-```
-
----
-
-## 🚀 Future Enhancements
-
-### Planned Features
-
-1. **Multi-Modal Support**
-   - Upload course syllabi, schedule screenshots
-   - Image-based question answering
-
-2. **Recommendation Engine**
-   - ML-based course recommendations
-   - Similarity matching with successful students
-
-3. **Real-time Schedule Planning**
-   - Interactive calendar view
-   - Conflict detection
-   - Export to Google Calendar
-
-4. **Email Notifications**
-   - Registration deadline reminders
-   - New course announcements
-   - Degree progress milestones
-
-5. **Analytics Dashboard**
-   - Admin view: popular questions, usage stats
-   - Student engagement metrics
-   - System performance monitoring
-
-6. **Voice Input**
-   - Speech-to-text integration
-   - Hands-free interaction
-
-7. **Export Functionality**
-   - Download chat history as PDF
-   - Save degree plan as document
-
-8. **Course Reviews Integration**
-   - Student feedback and ratings
-   - Rate-my-professor data
-
-9. **Career Path Mapping**
-   - Link courses to job roles
-   - Skills gap analysis
-
-10. **Multi-Language Support**
-    - i18n for international students
-    - Translation API integration
-
-### Scalability Improvements
-
-1. **PostgreSQL Migration**
-   - Replace SQLite for production
-   - Support concurrent writes
-
-2. **Redis Cluster**
-   - High-availability setup
-   - Automatic failover
-
-3. **Load Balancing**
-   - Multiple backend instances
-   - Nginx load balancer
-
-4. **Caching Layer**
-   - Redis query caching
-   - CDN for static assets
-
-5. **Monitoring & Logging**
-   - Prometheus metrics
-   - Grafana dashboards
-   - ELK stack for logs
-
----
-
-## 📞 Support & Contribution
-
-### Getting Help
-
-- **Documentation**: See `/docs` directory for detailed guides
-- **Issues**: Open a GitHub issue for bugs or feature requests
-- **Discussions**: Join GitHub Discussions for Q&A
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-**Built with ❤️ for WPI Business School Students**
-
-*Last Updated: 2025-12-10*
+- **Build** (`python -m app.services.vector_index build`, or the admin API) takes an exclusive file
+  lock, writes a new version, validates it and writes the manifest last. Only then is `CURRENT`
+  replaced (`os.replace`, atomic). Old versions beyond `VECTOR_INDEX_KEEP` are pruned; the active
+  one never is.
+- **Serve.** Each process checks `CURRENT` at most every 5 s and opens the new version. It uses
+  the embedding model recorded in the manifest and refuses a version whose stored vector size
+  doesn't match that model, staying on the version it already has.
+- **Rollback** (`activate <version>`) is the same pointer switch.
+
+This replaced an earlier design in which every worker rebuilt the shared index in place at startup
+whenever the PDFs changed. That raced across workers and processes, and it hid a second problem:
+the original index's embedding model (`models/embedding-001`) had been retired, so query vectors
+silently fell back to a different model and every vector search failed with a dimension error.
+
+## Failure modes
+
+| Failure | Behavior |
+|---------|----------|
+| Gemini slow or rate-limited | Each call times out at 60 s and retries with backoff; the turn ends at 120 s with a "took too long" message |
+| Intent classifier down | One retry, then the question goes straight to the adviser |
+| Embedding API unavailable at serve time | That process keeps its current index; semantic search errors are absorbed by the DB-first search path |
+| New index fails validation | Build rejected (422 from the admin API); active version unchanged |
+| Redis down | Requests fail (auth, limits and sessions depend on it); `/api/health` stays up for liveness |
+| Browser disconnects mid-answer | Agent task cancelled |
+| A worker restarts | No user-visible effect: all state is in Redis |
+| Certificate near expiry | certbot renews within 30 days of expiry; nginx reloads every 6 h |
+
+## Deployment topology
+
+| | Development | Production (`docker-compose.prod.yml`) |
+|-|-------------|-----------------------------------------|
+| Public ports | 8443 HTTPS, 8080 → redirect | 443 HTTPS, 80 → redirect + ACME |
+| Certificate | Self-signed (`scripts/gen-dev-cert.sh`) | Let's Encrypt via certbot |
+| Demo account | Optional (`DEMO_LOGIN_ENABLED`) | Forced off |
+| Backend | 127.0.0.1:8000 (Swagger UI for debugging) | same; only nginx reaches it |
+| Network | Bridge `172.28.0.0/24`, nginx fixed at `172.28.0.10` | same |
+
+## Observability
+
+- **Logs.** Structured lines without student content (counts and lengths only).
+- **Traces.** With LangSmith enabled, `chat_turn` is the root run; the intent chain and the
+  LangGraph run (every model and tool call) nest under it. Runs are grouped into threads by
+  `session_id`. A global client with an anonymizer redacts emails, IDs and labelled names before
+  upload, and the user is a keyed hash. OCR and summary calls record sizes only.
+- **Health.** `/api/health` for liveness (used by Docker); `/api/status` (authenticated,
+  rate-limited) reports vector index, Gemini and streaming.
+
+## Design decisions
+
+- **Own JWTs instead of passing Azure AD tokens through.** One token format for every sign-in
+  method, roles under our control, and revocation independent of Azure AD.
+- **HttpOnly cookie instead of a token in `localStorage`.** An XSS bug can still act as the user
+  while the page is open, but cannot exfiltrate a reusable credential.
+- **Fail open on intent.** The gate saves cost on off-topic questions; the adviser can only use
+  read-only academic tools, so answering an off-topic question is cheap to tolerate, while
+  refusing every question during an outage is not.
+- **Minimize, then redact.** Removing the student's name and ID from the prompt did more than any
+  regex could: free-text model reasoning once repeated the name, which redaction cannot catch.
+- **Offline, versioned indexes.** Builds are slow and can fail; doing them out of band, validating
+  before switching, and keeping old versions turns an outage risk into a routine operation.
+- **Tailwind compiled at build time.** Removes the last reason for `'unsafe-inline'` in the CSP.
+
+## Known limitations
+
+- Microsoft sign-in is unit-tested but not yet exercised against a real Azure AD app registration.
+- LangSmith tracing is verified by capturing the client's HTTP payloads, not against the service.
+- Rate limits count requests, not tokens; one very long conversation can still be expensive.
+- Redis is a single instance without replication or backups beyond AOF.
+- `package-lock.json` files are git-ignored, so frontend builds are not fully reproducible.
+- `/api/status` makes a real Gemini call (rate-limited per user).

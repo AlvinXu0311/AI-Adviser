@@ -93,6 +93,10 @@ def _gemini_chat_model(settings: Dict[str, Any]) -> BaseChatModel:
         "max_output_tokens": settings["max_tokens"],
         "thinking_level": settings["thinking"],
         "api_key": api_key,
+        # Per-request deadline (seconds) and retry budget; the SDK retries 408/429/5xx with
+        # exponential backoff and jitter
+        "timeout": float(os.getenv("GEMINI_TIMEOUT_SECONDS", "60")),
+        "max_retries": int(os.getenv("GEMINI_MAX_RETRIES", "3")),
     }
     if settings.get("include_thoughts"):
         kwargs["include_thoughts"] = True  # "low" thinking returns no thought summaries

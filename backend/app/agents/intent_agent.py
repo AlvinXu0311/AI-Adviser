@@ -189,3 +189,31 @@ def get_intent_agent() -> IntentAgent:
     if _INTENT_AGENT is None:
         _INTENT_AGENT = IntentAgent()
     return _INTENT_AGENT
+
+
+INTENT_ATTEMPTS = int(os.getenv("INTENT_AGENT_ATTEMPTS", "2"))
+
+
+async def classify_with_fallback(
+    message: str, conversation_history: list = None, conversation_summary: str = ""
+) -> tuple[IntentClassification, bool]:
+    """
+    Classify with retries; if every attempt fails (timeout, provider error), fail open.
+
+    Failing open is safe here: the intent gate only saves cost on off-topic questions, and the
+    adviser can only answer from read-only academic tools. Returns (classification, degraded).
+    """
+    agent = get_intent_agent()
+    for attempt in range(1, INTENT_ATTEMPTS + 1):
+        try:
+            return await agent.classify(message, conversation_history, conversation_summary), False
+        except Exception as exc:
+            logger.warning("Intent classification attempt %d/%d failed: %s", attempt, INTENT_ATTEMPTS, exc)
+    logger.error("Intent classifier unavailable; passing the question to the adviser")
+    return IntentClassification(
+        intent="unclassified",
+        confidence=1.0,
+        is_academic=True,
+        requires_transcript=False,
+        reasoning="Intent classifier unavailable; defaulted to academic",
+    ), True

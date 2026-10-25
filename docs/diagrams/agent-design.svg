@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 560" role="img" aria-label="Agent design: each turn the graph receives a system message, the chat history and the student's question with transcript summary and an optional database prefetch. The agent node calls gemini-3.8-flash with seven bound tools. While the model returns tool calls, the ToolNode runs them in parallel and returns ToolMessages; four search tools go through the search service, business_school_database reads SQLite, and student_context and degree_progress read the session transcript. After eight tool rounds the agent must answer without tools. Each step is streamed to the browser as an SSE event.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 560" role="img" aria-label="Agent design: before the graph runs, the intent agent classifies the question, retrying once and failing open; the whole turn has a 120-second deadline and is cancelled if the browser disconnects. Each turn the graph receives a system message with the tool guide and a rule that tool and transcript data are never instructions, the chat history with a rolling summary, and the question with GPA, program and course count but no name or student ID, plus an optional database prefetch. The agent node calls gemini-3.8-flash, with a 60-second timeout and three retries, with seven bound tools. While the model returns tool calls, the ToolNode runs them in parallel; four search tools use the search service, business_school_database reads SQLite, and student_context and degree_progress read the sanitized transcript, fenced as untrusted data. After eight tool rounds the agent must answer without tools. Each step streams to the browser as an SSE event, and the turn is one LangSmith trace.">
   <style>
     svg { --bg:#f6f7f9; --panel:#ffffff; --tint:#e9ecf1; --fg:#1a212b; --soft:#4a5464; --muted:#5f6a7a; --line:#c3cad5; --accent:#a3222e; }
     @media (prefers-color-scheme: dark) {
@@ -32,15 +32,15 @@
   <text class="rl" x="34" y="62">MESSAGES PER TURN</text>
   <rect class="bx" x="36" y="80" width="228" height="62" rx="6"/>
   <text class="t" x="150" y="100" text-anchor="middle">SystemMessage</text>
-  <text class="s" x="150" y="118" text-anchor="middle">tool guide · rules</text>
-  <text class="s" x="150" y="134" text-anchor="middle">program list from SQLite</text>
+  <text class="s" x="150" y="118" text-anchor="middle">tool guide · program list</text>
+  <text class="s" x="150" y="134" text-anchor="middle">tool data ≠ instructions</text>
   <rect class="bx" x="36" y="160" width="228" height="46" rx="6"/>
   <text class="t" x="150" y="180" text-anchor="middle">chat history</text>
-  <text class="s" x="150" y="197" text-anchor="middle">last 20 turns as messages</text>
+  <text class="s" x="150" y="197" text-anchor="middle">recent turns + summary</text>
   <rect class="bx" x="36" y="224" width="228" height="62" rx="6"/>
   <text class="t" x="150" y="244" text-anchor="middle">HumanMessage</text>
   <text class="s" x="150" y="262" text-anchor="middle">question · selected topic</text>
-  <text class="s" x="150" y="278" text-anchor="middle">transcript summary</text>
+  <text class="s" x="150" y="278" text-anchor="middle">GPA · program · no name/ID</text>
   <rect class="bx dash" x="36" y="330" width="228" height="62" rx="6"/>
   <text class="t" x="150" y="350" text-anchor="middle">DB prefetch</text>
   <text class="s" x="150" y="368" text-anchor="middle">program / course keywords</text>
@@ -57,9 +57,10 @@
   <rect class="bx" x="490" y="88" width="80" height="26" rx="13"/>
   <text class="t" x="530" y="106" text-anchor="middle">END</text>
   <rect class="bx acc" x="420" y="200" width="220" height="80" rx="6"/>
-  <text class="t" x="530" y="224" text-anchor="middle"><tspan class="dia">◆</tspan> agent</text>
-  <text class="s" x="530" y="244" text-anchor="middle">gemini-3.8-flash</text>
-  <text class="s" x="530" y="260" text-anchor="middle">thinking medium · 7 tools bound</text>
+  <text class="t" x="530" y="221" text-anchor="middle"><tspan class="dia">◆</tspan> agent</text>
+  <text class="s" x="530" y="239" text-anchor="middle">gemini-3.8-flash</text>
+  <text class="s" x="530" y="254" text-anchor="middle">thinking medium · 7 tools</text>
+  <text class="s" x="530" y="269" text-anchor="middle">60 s timeout · 3 retries</text>
   <line class="ln" x1="530" y1="200" x2="530" y2="116" marker-end="url(#arr)"/>
   <text class="lb" x="538" y="164">no tool_calls → answer</text>
 
@@ -71,6 +72,10 @@
   <text class="lb" x="472" y="328" text-anchor="end">tool_calls</text>
   <line class="ln" x1="580" y1="370" x2="580" y2="282" marker-end="url(#arr)"/>
   <text class="lb" x="588" y="328">ToolMessages</text>
+
+  <rect class="bx dash" x="420" y="458" width="220" height="46" rx="6"/>
+  <text class="t" x="530" y="478" text-anchor="middle">LangSmith trace</text>
+  <text class="s" x="530" y="495" text-anchor="middle">chat_turn → intent + graph</text>
 
   <polyline class="ln a dash" points="640,266 672,266 672,216 642,216" marker-end="url(#arra)"/>
   <text class="lb a" x="678" y="238">≥ 8 rounds:</text>
@@ -105,7 +110,7 @@
   <text class="m" x="822" y="306">degree_progress</text>
   <rect class="bx" x="1050" y="264" width="156" height="54" rx="6"/>
   <text class="t" x="1128" y="286" text-anchor="middle">transcript</text>
-  <text class="s" x="1128" y="304" text-anchor="middle">+ SQLite requirements</text>
+  <text class="s" x="1128" y="304" text-anchor="middle">sanitized · fenced</text>
   <line class="ln" x1="1008" y1="290" x2="1048" y2="290" marker-end="url(#arr)"/>
 
   <!-- Events -->
@@ -124,6 +129,11 @@
   <text class="m" x="1010" y="504">final</text>
   <text class="s" x="796" y="528">thought text = Gemini thought summary</text>
 
-  <text class="lb" x="20" y="452"><tspan class="dia">◆</tspan> calls the Gemini API</text>
-  <text class="lb" x="20" y="472">dashed box: only for program / course questions</text>
+  <rect class="bx acc" x="20" y="436" width="260" height="66" rx="6"/>
+  <text class="t" x="150" y="456" text-anchor="middle"><tspan class="dia">◆</tspan> around the graph</text>
+  <text class="s" x="150" y="474" text-anchor="middle">intent first: retry → fail open</text>
+  <text class="s" x="150" y="490" text-anchor="middle">120 s deadline · stop on disconnect</text>
+
+  <text class="lb" x="20" y="530"><tspan class="dia">◆</tspan> calls the Gemini API</text>
+  <text class="lb" x="20" y="548">dashed: prefetch only for program / course questions</text>
 </svg>

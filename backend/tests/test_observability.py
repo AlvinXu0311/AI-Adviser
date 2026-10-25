@@ -22,6 +22,8 @@ def captured(monkeypatch):
     """Enable tracing with a client whose HTTP calls are recorded instead of sent."""
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
+    # langsmith memoizes env lookups; an earlier test may have cached "tracing off"
+    langsmith.utils.get_env_var.cache_clear()
     client = langsmith.Client(api_key="test-key", api_url="http://langsmith.invalid",
                               auto_batch_tracing=False, anonymizer=create_anonymizer(REDACTION_RULES))
     posted = []
@@ -38,6 +40,7 @@ def captured(monkeypatch):
     langsmith.configure(client=client)
     yield posted
     langsmith.configure(client=previous)
+    langsmith.utils.get_env_var.cache_clear()
 
 
 def _runs(posted):

@@ -16,9 +16,9 @@ export interface User {
 
 const AUTH_STORAGE_KEY = 'wpi_adviser_auth';
 
-// Backend token response (POST /api/auth/demo-login, /api/auth/microsoft)
+// Backend sign-in response (POST /api/auth/demo-login, /api/auth/microsoft); the token itself
+// arrives as an HttpOnly cookie and is never visible to this code
 interface TokenResponse {
-  access_token: string;
   expires_in: number;
   email: string;
   name: string;
@@ -45,8 +45,9 @@ export async function getAuthConfig(): Promise<AuthConfig> {
 async function exchangeForSession(path: string, body: object, microsoftAccount?: AccountInfo): Promise<User> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
     body: JSON.stringify(body),
+    credentials: 'include',
   });
   if (!res.ok) {
     const detail = await res.json().then((d) => d.detail).catch(() => '');
@@ -54,7 +55,7 @@ async function exchangeForSession(path: string, body: object, microsoftAccount?:
   }
   const token: TokenResponse = await res.json();
   const user: User = { email: token.email, name: token.name, loginTime: new Date(), microsoftAccount };
-  storeSession(user, token.access_token, token.expires_in);
+  storeSession(user, token.expires_in);
   return user;
 }
 
@@ -140,31 +141,42 @@ export function isMicrosoftAuthenticated(): boolean {
 }
 
 /**
- * Store user session and the backend access token in localStorage
+ * Store the signed-in user's display profile (not a credential) in localStorage
  */
-export function storeSession(user: User, accessToken: string, expiresInSeconds: number): void {
+export function storeSession(user: User, expiresInSeconds: number): void {
   const session = {
     email: user.email,
     name: user.name,
     loginTime: user.loginTime.toISOString(),
-    accessToken,
     expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
   };
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
 }
 
 /**
- * Backend access token for the current session, or null if signed out / expired
+ * Ask the backend whether the session cookie is still valid (it may have been revoked)
  */
-export function getAccessToken(): string | null {
+export async function verifySession(): Promise<boolean> {
   try {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!stored) return null;
-    const session = JSON.parse(stored);
-    if (!session.accessToken || new Date(session.expiresAt) < new Date()) return null;
-    return session.accessToken;
+    const res = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: 'include' });
+    return res.ok;
   } catch {
-    return null;
+    return false;
+  }
+}
+
+/**
+ * Revoke the session server-side and clear the cookie
+ */
+export async function logoutFromBackend(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch' },
+      credentials: 'include',
+    });
+  } catch (error) {
+    console.error('[Auth] Backend logout failed:', error);
   }
 }
 
@@ -180,8 +192,8 @@ export function getStoredSession(): User | null {
     const session = JSON.parse(stored);
     const expiresAt = new Date(session.expiresAt);
 
-    // Check if session has expired (sessions from before backend auth have no token)
-    if (expiresAt < new Date() || !session.accessToken) {
+    // Check if session has expired
+    if (expiresAt < new Date()) {
       clearSession();
       return null;
     }

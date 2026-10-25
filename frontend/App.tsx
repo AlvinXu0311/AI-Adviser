@@ -5,7 +5,7 @@ import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
 import { EndChatModal } from './components/EndChatModal';
 import { ChatState, AgentStatus, User } from './types';
-import { getStoredSession, clearSession, logoutFromMicrosoft } from './services/authService';
+import { getStoredSession, clearSession, logoutFromMicrosoft, logoutFromBackend, verifySession } from './services/authService';
 import { initializeMsal } from './config/msalConfig';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -22,10 +22,12 @@ const App: FC = () => {
         // Initialize MSAL first
         await initializeMsal();
         
-        // Then check for stored session
+        // Then check for stored session, and that the backend still accepts its cookie
         const storedUser = getStoredSession();
-        if (storedUser) {
+        if (storedUser && await verifySession()) {
           setUser(storedUser);
+        } else if (storedUser) {
+          clearSession();
         }
       } catch (error) {
         console.error('[App] MSAL initialization error:', error);
@@ -63,7 +65,7 @@ const App: FC = () => {
     }
   }, [user]);
 
-  // The login flows store the session and backend token themselves (authService.storeSession)
+  // The login flows store the profile themselves; the session token is an HttpOnly cookie
   const handleLogin = (loginUser: User) => {
     setUser({
       ...loginUser,
@@ -78,6 +80,8 @@ const App: FC = () => {
     } catch (error) {
       console.error('[App] Logout error:', error);
     }
+    // Revoke the token server-side, not just locally
+    await logoutFromBackend();
     clearSession();
     setUser(null);
     setChatState({

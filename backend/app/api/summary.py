@@ -12,7 +12,7 @@ from ..auth import User
 from ..observability import traced_opaque
 from ..services.rate_limit import rate_limited
 
-from ..config import gemini_model
+from ..config import gemini_model, legacy_request_options
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,8 @@ def get_gemini_model():
 )
 def _generate_summary(model, prompt: str, message_count: int, generation_config: dict):
     """Gemini call for the end-of-chat summary; traced without its content (it is the student's chat)."""
-    return model.generate_content(prompt, generation_config=generation_config)
+    return model.generate_content(prompt, generation_config=generation_config,
+                                  request_options=legacy_request_options())
 
 
 @router.post("/summarize", response_model=SummaryResponse)

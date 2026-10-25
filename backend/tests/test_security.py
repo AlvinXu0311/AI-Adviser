@@ -80,12 +80,19 @@ class TestDemoLogin:
         response = client.post("/api/auth/demo-login", json={"email": "demo@wpi.edu", "password": "nope"})
         assert response.status_code == 401
 
-    def test_login_returns_working_token(self, client, demo_env):
+    def test_login_sets_httponly_cookie_not_body_token(self, fake_redis, demo_env):
+        # https base URL: the cookie jar only sends Secure cookies over HTTPS, like a browser
+        client = TestClient(app, base_url="https://testserver")
         response = client.post("/api/auth/demo-login",
                                json={"email": "Demo@WPI.edu", "password": "correct horse battery staple"})
         assert response.status_code == 200
-        token = response.json()["access_token"]
-        me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert "access_token" not in response.json()
+        cookie = response.headers["set-cookie"]
+        assert "adviser_session=" in cookie and "HttpOnly" in cookie
+        assert "Secure" in cookie and "SameSite=strict" in cookie and "Path=/api" in cookie
+
+        # The TestClient's cookie jar now authenticates follow-up requests
+        me = client.get("/api/auth/me")
         assert me.json()["email"] == "demo@wpi.edu"
         assert me.json()["roles"] == []
 
@@ -237,3 +244,43 @@ class TestProgramDefault:
         from app.agents.adviser_agent import AdviserAgent
         text = AdviserAgent._format_agent_input(object.__new__(AdviserAgent), "Core courses?", program_id="msba")
         assert "Program: MSBA" in text
+
+
+@pytest.fixture
+def cookie_client(client, demo_env, monkeypatch):
+    """Client signed in through the real demo login, so it holds the session cookie."""
+    # TestClient talks plain http; let the cookie through without Secure for these tests
+    monkeypatch.setenv("COOKIE_SECURE", "false")
+    response = client.post("/api/auth/demo-login",
+                           json={"email": "demo@wpi.edu", "password": "correct horse battery staple"})
+    assert response.status_code == 200
+    return client
+
+
+@pytest.mark.unit
+class TestCookieSession:
+    def test_cookie_write_requires_csrf_header(self, cookie_client):
+        response = cookie_client.post("/api/chat", json={"message": "???"})
+        assert response.status_code == 403
+        response = cookie_client.post("/api/chat", json={"message": "???"},
+                                      headers={"X-Requested-With": "fetch"})
+        assert response.status_code == 200
+
+    def test_cookie_reads_need_no_csrf_header(self, cookie_client):
+        assert cookie_client.get("/api/auth/me").status_code == 200
+
+    def test_logout_revokes_token_server_side(self, cookie_client):
+        token = cookie_client.cookies.get("adviser_session")
+        response = cookie_client.post("/api/auth/logout", headers={"X-Requested-With": "fetch"})
+        assert response.status_code == 200
+
+        # The same token is rejected even if replayed (e.g. copied before logout)
+        replay = TestClient(app).get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert replay.status_code == 401
+        assert "revoked" in replay.json()["detail"]
+
+    def test_revocation_expires_with_token(self, cookie_client, fake_redis):
+        token = cookie_client.cookies.get("adviser_session")
+        cookie_client.post("/api/auth/logout", headers={"X-Requested-With": "fetch"})
+        jti = jwt.decode(token, options={"verify_signature": False})["jti"]
+        assert 0 < fake_redis.ttl(f"revoked_token:{jti}") <= 8 * 3600

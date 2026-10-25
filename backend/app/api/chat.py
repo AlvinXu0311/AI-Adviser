@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 import logging
 import asyncio
 import json
+import os
 import time
 from asyncio import create_task
 from ..schemas.chat import ChatRequest, ChatResponse
@@ -31,6 +32,9 @@ router = APIRouter()
 
 # Sent to the client instead of internal exception text (details stay in the server log)
 GENERIC_ERROR = "Something went wrong while answering. Please try again."
+
+TIMEOUT_ERROR = "This question took too long to answer. Please try again or ask something more specific."
+ADVISER_TIMEOUT_SECONDS = float(os.getenv("ADVISER_TIMEOUT_SECONDS", "120"))
 
 # SSE must not be buffered by nginx or cached by the browser
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -180,11 +184,13 @@ async def chat(
                     # Step 1: Intent Classification (with conversation history for context)
                     logger.debug("Step 1: Classifying user intent")
                     await queue.put(json.dumps({"type": "stage", "content": "Understanding your question"}))
-                    from ..agents.intent_agent import get_intent_agent
-                    intent_agent = get_intent_agent()
-                    intent_classification = await intent_agent.classify(
+                    from ..agents.intent_agent import classify_with_fallback
+                    # Retries, then fails open instead of failing the whole request
+                    intent_classification, intent_degraded = await classify_with_fallback(
                         request.message, conversation_history, conversation_summary
                     )
+                    if trace_run and intent_degraded:
+                        trace_run.add_tags(["intent-degraded"])
                     logger.info(f"Intent detected: {intent_classification.intent} (confidence: {intent_classification.confidence}, is_academic: {intent_classification.is_academic})")
 
                     # Layer 2: Intent validation - reject non-academic or low confidence queries
@@ -225,7 +231,8 @@ async def chat(
 
                     # Call RAG agent with intent context
                     logger.debug("Step 3: Calling RAG agent with intent context")
-                    result = await adviser_agent.answer_query(
+                    # Overall deadline for the agent loop (each LLM call also has its own timeout)
+                    result = await asyncio.wait_for(adviser_agent.answer_query(
                         query=request.message,
                         context=student_context_to_use,
                         session_id=session_id,
@@ -233,7 +240,7 @@ async def chat(
                         topic_id=topic_id,  # Pass selected topic
                         on_event=forward_event,
                         conversation_summary=conversation_summary,
-                    )
+                    ), timeout=ADVISER_TIMEOUT_SECONDS)
 
                     response_text = result.get("response", "")
                     logger.debug("RAG agent response generated")
@@ -260,6 +267,12 @@ async def chat(
                 logger.info(f"Chat answered in {latency_ms:.0f} ms")
                 _compact_in_background(memory, session_id)
 
+            except asyncio.TimeoutError:
+                logger.error(f"Adviser timed out after {ADVISER_TIMEOUT_SECONDS}s")
+                await queue.put(json.dumps({"type": "error", "content": TIMEOUT_ERROR}))
+            except asyncio.CancelledError:
+                logger.info("Chat turn cancelled (client disconnected)")
+                raise
             except Exception as e:
                 logger.error(f"Error in agent task: {e}", exc_info=True)
                 await queue.put(json.dumps({"type": "error", "content": GENERIC_ERROR}))
@@ -268,13 +281,18 @@ async def chat(
 
         task = create_task(agent_task())
 
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield f"data: {item}\n\n"
-        
-        await task
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"data: {item}\n\n"
+            await task
+        finally:
+            # Starlette cancels this generator when the client disconnects; stop the agent too,
+            # so an abandoned turn doesn't keep spending LLM calls
+            if not task.done():
+                task.cancel()
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream", headers=SSE_HEADERS)
 

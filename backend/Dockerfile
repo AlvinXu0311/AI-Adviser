@@ -38,6 +38,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Session state lives in Redis, so any worker can serve any request
-ENV UVICORN_WORKERS=2
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips='*'"]
+# Session state lives in Redis, so any worker can serve any request.
+# X-Forwarded-* headers are trusted only from FORWARDED_ALLOW_IPS (the nginx container).
+ENV UVICORN_WORKERS=2 \
+    FORWARDED_ALLOW_IPS=127.0.0.1
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS}\""]

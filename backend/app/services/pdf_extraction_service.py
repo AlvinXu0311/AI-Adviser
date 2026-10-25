@@ -7,7 +7,7 @@ import logging
 import re
 import json
 from datetime import datetime
-from ..config import gemini_model
+from ..config import gemini_model, legacy_request_options
 from ..observability import traced_opaque
 from ..schemas.transcript import (
     ExtractedTranscriptData,
@@ -56,10 +56,11 @@ class PDFExtractionService:
             """
 
             # Blocking SDK call: run it in a worker thread so the event loop keeps serving requests
-            response = await asyncio.to_thread(self.llm_backend.generate_content, [
-                prompt,
-                {"mime_type": "application/pdf", "data": pdf_base64}
-            ])
+            response = await asyncio.to_thread(
+                self.llm_backend.generate_content,
+                [prompt, {"mime_type": "application/pdf", "data": pdf_base64}],
+                request_options=legacy_request_options(),
+            )
 
             if not response.text:
                 raise ValueError("Failed to extract text from PDF")
@@ -178,7 +179,7 @@ Here is the COMPLETE raw transcript text to analyze:
 {raw_text}
 """
 
-            response = self.llm_backend.generate_content(formatting_prompt)
+            response = self.llm_backend.generate_content(formatting_prompt, request_options=legacy_request_options())
 
             if not response.text:
                 raise ValueError("LLM returned empty response")

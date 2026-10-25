@@ -12,6 +12,8 @@ import os
 import json
 import logging
 
+import pytest
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +29,7 @@ from app.agents.adviser_agent import get_adviser_agent
 from app.services.program_db_service import get_program_db_service
 
 
+@pytest.mark.live
 async def test_intent_agent():
     """Test 1: Intent Agent classification with free-form LLM analysis"""
     print("\n" + "="*80)
@@ -65,48 +68,23 @@ async def test_intent_agent():
 
 
 def test_database():
-    """Test 2: Database population verification"""
-    print("\n" + "="*80)
-    print("TEST 2: Database Population Verification")
-    print("="*80)
-
+    """Test 2: the bundled Business School database has the programs and courses the agent relies on"""
     db_service = get_program_db_service()
 
-    # Test program retrieval
     programs = db_service.get_all_programs()
-    print(f"\nPrograms in database: {len(programs)}")
-    for prog in programs:
-        print(f"  - {prog.get('program_code')}: {prog.get('program_name')}")
+    names = {p["program_name"] for p in programs}
+    assert len(programs) >= 6
+    assert {"Master's in Information Technology", "Master of Business Administration"} <= names
+    assert all(p["program_id"] for p in programs)
 
-    if len(programs) != 3:
-        print(f"✗ Expected 3 programs, got {len(programs)}")
-        return False
+    course = db_service.get_course_by_code("MIS 571")
+    assert course and course["code"] == "MIS 571"
+    assert "Database" in course["title"] and course["credits"]
 
-    # Test specialties for each program
-    program_codes = ["MSIT", "MSBA", "MSM"]
-    for code in program_codes:
-        program = next((p for p in programs if p.get('program_code') == code), None)
-        if program:
-            specialties = db_service.get_specialties_by_program(program.get('id'))
-            print(f"\n{code} Specialties: {len(specialties)}")
-            for spec in specialties:
-                print(f"  - {spec.get('specialty_name')}")
-        else:
-            print(f"✗ Program {code} not found")
-            return False
-
-    # Test courses
-    courses = db_service.get_all_courses()
-    print(f"\nCourses in database: {len(courses)}")
-
-    if len(courses) != 14:
-        print(f"✗ Expected 14 courses, got {len(courses)}")
-        return False
-
-    print("\n✓ Test 2 PASSED: Database properly populated")
-    return True
+    assert db_service.search_courses("database")
 
 
+@pytest.mark.live
 async def test_rag_agent():
     """Test 3: Adviser Agent with Database-First retrieval"""
     print("\n" + "="*80)
@@ -148,6 +126,7 @@ async def test_rag_agent():
         return False
 
 
+@pytest.mark.live
 async def test_full_pipeline():
     """Test 4: Complete Intent → Adviser → Response pipeline"""
     print("\n" + "="*80)

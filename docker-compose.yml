@@ -81,6 +81,16 @@ services:
       - LOGIN_MAX_FAILURES=${LOGIN_MAX_FAILURES:-5}
       - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-900}
       - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      # Only nginx (fixed address below) may set X-Forwarded-For / -Proto for the backend
+      - FORWARDED_ALLOW_IPS=172.28.0.10
+      # Session cookie: HttpOnly + SameSite=Strict always; Secure unless explicitly disabled
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - APP_TOKEN_TTL_SECONDS=${APP_TOKEN_TTL_SECONDS:-28800}
+      # Timeouts / retries for Gemini calls and the whole agent turn
+      - GEMINI_TIMEOUT_SECONDS=${GEMINI_TIMEOUT_SECONDS:-60}
+      - GEMINI_MAX_RETRIES=${GEMINI_MAX_RETRIES:-3}
+      - ADVISER_TIMEOUT_SECONDS=${ADVISER_TIMEOUT_SECONDS:-120}
+      - INTENT_AGENT_ATTEMPTS=${INTENT_AGENT_ATTEMPTS:-2}
       # Chat context compaction (rolling summary of older turns)
       - COMPACTION_TRIGGER_MESSAGES=${COMPACTION_TRIGGER_MESSAGES:-16}
       - COMPACTION_TRIGGER_TOKENS=${COMPACTION_TRIGGER_TOKENS:-6000}
@@ -88,7 +98,7 @@ services:
 
       # CORS Configuration (allow frontend access from browser)
       - ALLOW_ALL_ORIGINS=false
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+      - FRONTEND_URL=${FRONTEND_URL:-https://localhost:8443}
 
       # LangSmith tracing (off unless LANGSMITH_TRACING=true and an API key is set).
       # PII redaction stays on unless LANGSMITH_REDACT_PII=false.
@@ -105,6 +115,8 @@ services:
 
       # Embedding provider (google or local)
       - EMBEDDING_PROVIDER=google
+      - GOOGLE_EMBEDDING_MODEL=${GOOGLE_EMBEDDING_MODEL:-models/gemini-embedding-001}
+      - VECTOR_INDEX_KEEP=${VECTOR_INDEX_KEEP:-3}
       
       # Database path (for Docker container)
       - BUS_SCHOOL_DB_PATH=/app/database/database_project/bus_school.db
@@ -140,13 +152,22 @@ services:
         VITE_MSAL_TENANT_ID: ${AZURE_TENANT_ID:-}
     container_name: ai-adviser-frontend
     restart: unless-stopped
+    # HTTP only redirects to HTTPS (and serves /healthz). Production: HTTP_PORT=80, HTTPS_PORT=443
     ports:
-      - "8080:8080"
+      - "${HTTP_PORT:-8080}:8080"
+      - "${HTTPS_PORT:-8443}:8443"
+    environment:
+      - PUBLIC_HTTPS_PORT=${HTTPS_PORT:-8443}
+      # Set to your load balancer's address range if one sits in front of nginx (enables real client IPs)
+      - TRUSTED_PROXY_CIDR=${TRUSTED_PROXY_CIDR:-127.0.0.1/32}
+    volumes:
+      # fullchain.pem + privkey.pem (scripts/gen-dev-cert.sh makes a self-signed pair for local use)
+      - ${TLS_CERT_DIR:-./certs}:/etc/nginx/certs:ro
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -159,11 +180,16 @@ services:
           cpus: "0.5"
           memory: 256M
     networks:
-      - ai-adviser-network
+      ai-adviser-network:
+        ipv4_address: 172.28.0.10
 
 networks:
   ai-adviser-network:
     driver: bridge
+    # Fixed subnet so the backend can trust proxy headers from nginx's address only
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
 
 volumes:
   redis_data:

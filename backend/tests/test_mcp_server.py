@@ -7,9 +7,14 @@ list/call/read round-trips against the bundled SQLite database.
 import json
 from unittest.mock import patch
 
-from mcp import Client
+import pytest
 
-from mcp_server.server import mcp
+# The MCP SDK lives in its own venv (it needs a newer starlette than the backend);
+# run these with: .venv-mcp/bin/python -m pytest tests/test_mcp_server.py
+pytest.importorskip("mcp")
+from mcp import Client  # noqa: E402
+
+from mcp_server.server import mcp  # noqa: E402
 
 EXPECTED_TOOLS = {
     "search_courses",

@@ -33,8 +33,9 @@ class TestChatEndpoint:
             json={"message": ""}
         )
 
-        assert response.status_code == 400
-        assert "empty" in response.json()["detail"].lower()
+        # ChatRequest enforces min_length=1, so FastAPI rejects it before the handler runs
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"][-1] == "message"
 
     def test_chat_endpoint_message_too_long(self, client):
         """Test chat endpoint with message exceeding max length"""
@@ -45,8 +46,9 @@ class TestChatEndpoint:
             json={"message": long_message}
         )
 
-        assert response.status_code == 400
-        assert "exceeds maximum length" in response.json()["detail"]
+        # ChatRequest enforces max_length=5000
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["type"] == "string_too_long"
 
     def test_chat_endpoint_missing_message(self, client):
         """Test chat endpoint with missing message field"""
@@ -268,5 +270,5 @@ class TestErrorHandling:
             json={"message": ""}
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert "detail" in response.json()

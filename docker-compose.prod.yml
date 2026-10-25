@@ -1,0 +1,44 @@
+# Production overrides: real Let's Encrypt certificates on ports 80/443.
+#
+#   First time:  DOMAIN=adviser.example.edu LETSENCRYPT_EMAIL=ops@example.edu ./scripts/init-letsencrypt.sh
+#   Afterwards:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# DOMAIN must resolve to this host and ports 80/443 must be reachable from the internet
+# (Let's Encrypt validates over HTTP on port 80). Renewal is automatic: certbot checks twice a
+# day and nginx reloads every 6h to pick up the new files.
+services:
+  backend:
+    environment:
+      - FRONTEND_URL=https://${DOMAIN:?Set DOMAIN, e.g. adviser.example.edu}
+      - COOKIE_SECURE=true
+      - ENVIRONMENT=production
+      # Production never offers the shared demo account
+      - DEMO_LOGIN_ENABLED=false
+
+  frontend:
+    ports: !override
+      - "80:8080"
+      - "443:8443"
+    environment:
+      - PUBLIC_HTTPS_PORT=443
+      - TLS_CERT_FILE=/etc/letsencrypt/live/${DOMAIN}/fullchain.pem
+      - TLS_KEY_FILE=/etc/letsencrypt/live/${DOMAIN}/privkey.pem
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+
+  certbot:
+    image: certbot/certbot:v3.1.0
+    container_name: ai-adviser-certbot
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    # Renew (no-op until a cert is within 30 days of expiry) every 12 hours
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    networks:
+      - ai-adviser-network
+
+volumes:
+  letsencrypt:
+  certbot-www:

@@ -6,6 +6,8 @@ from typing import List
 from langchain_core.tools import StructuredTool
 import logging
 
+from ..services.untrusted import wrap_untrusted
+
 from ..services.search_service import (
     business_school_db_tool,
     pdf_context_tool,
@@ -107,7 +109,10 @@ def context_lookup_tool(info_type: str = "all") -> str:
                 else:
                     result.append("Academic Standing: Academic Warning")
 
-        return "\n".join(result) if result else "No student transcript data available for this session."
+        if not result:
+            return "No student transcript data available for this session."
+        # Course and program names come from the user's PDF: fence them as data for the model
+        return wrap_untrusted("\n".join(result))
 
     except Exception as e:
         logger.error(f"Error in context lookup tool: {str(e)}")

@@ -1,21 +1,28 @@
 """
 PDF Vector Search Service - RAG search from academic PDF documents.
 
-This service provides semantic search across PDF documents:
+This service provides read-only semantic search across PDF documents:
 - Bus-school courses.pdf
 - Masters from Graduate Bus School.pdf
 - Mathematical Science Courses.pdf
 - computer science Courses.pdf
 
 Uses PyMuPDF for text extraction, text chunking, and ChromaDB for vector storage.
+
+Serving processes never write the index. Indexes are built offline into a new versioned
+directory and activated atomically (see vector_index.py); every serving process notices the
+switch within RELOAD_CHECK_SECONDS and moves to the new version, so retrieval keeps working
+throughout a rebuild.
 """
 
+import json
 import os
 import re
 import logging
+import threading
+import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from hashlib import md5
 
 import chromadb
 from dotenv import load_dotenv
@@ -30,7 +37,12 @@ logger = logging.getLogger(__name__)
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # /app
 PDF_SOURCE_DIR = os.path.join(BASE_DIR, "database", "database_project")
-CHROMA_PATH = os.path.join(BASE_DIR, "database", "vector_db_pdf")
+# Index written before versioned builds existed; used read-only until a version is activated
+LEGACY_CHROMA_PATH = os.path.join(BASE_DIR, "database", "vector_db_pdf")
+CHROMA_PATH = LEGACY_CHROMA_PATH  # kept for callers that print it
+INDEX_ROOT = os.path.join(BASE_DIR, "database", "vector_index")
+COLLECTION_NAME = "pdf_documents"
+RELOAD_CHECK_SECONDS = float(os.getenv("VECTOR_INDEX_RELOAD_SECONDS", "5"))
 
 # PDF files to index
 PDF_FILES = [
@@ -45,53 +57,26 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Embedding provider: 'google' or 'local' (sentence-transformers)
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "google" if GOOGLE_API_KEY else "local").lower()
+# Model for new builds; an index is always queried with the model recorded in its manifest.
+# (models/embedding-001 was retired by Google, which silently broke the legacy index.)
+GOOGLE_EMBEDDING_MODEL = os.getenv("GOOGLE_EMBEDDING_MODEL", "models/gemini-embedding-001")
 
 
-class PDFVectorService:
-    """
-    Vector search service for academic PDF documents.
-    
-    Extracts text from PDFs, chunks content, creates embeddings,
-    and provides semantic search capabilities.
-    """
-    
-    _instance = None
-    _initialized = False
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    def __init__(self):
-        if PDFVectorService._initialized:
-            return
-        
-        logger.info(f"Initializing PDFVectorService with {EMBEDDING_PROVIDER} embeddings...")
-        
-        # Initialize embeddings based on provider
-        self._init_embeddings()
-        
-        # Initialize ChromaDB with persistent storage
-        os.makedirs(CHROMA_PATH, exist_ok=True)
-        self.chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-        
-        # Create collection for PDF documents
-        self.collection = self._get_or_create_collection("pdf_documents")
-        
-        # Build index if empty or PDFs changed
-        self._ensure_index()
-        
-        PDFVectorService._initialized = True
-        logger.info("PDFVectorService initialized successfully")
-    
-    def _init_embeddings(self):
-        """Initialize embedding model based on provider setting"""
-        if EMBEDDING_PROVIDER == "google" and GOOGLE_API_KEY:
+class _PdfPipeline:
+    """PDF text extraction, course-aware chunking and embeddings (shared by serving and the index builder)."""
+
+    def _init_embeddings(self, provider: str = EMBEDDING_PROVIDER, allow_fallback: bool = True,
+                         model: Optional[str] = None):
+        """
+        Initialize the embedding model. Serving passes the provider and model the index was built
+        with and allow_fallback=False: query vectors from a different model would silently return garbage.
+        """
+        if provider == "google" and GOOGLE_API_KEY:
             try:
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                model = model or GOOGLE_EMBEDDING_MODEL
                 self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model="models/embedding-001",
+                    model=model,
                     google_api_key=GOOGLE_API_KEY,
                     task_type="retrieval_query"
                 )
@@ -99,7 +84,9 @@ class PDFVectorService:
                 test_result = self.embeddings.embed_query("test")
                 if test_result and len(test_result) > 0:
                     self.embedding_type = "google"
-                    logger.info(f"Google Embeddings initialized successfully ({len(test_result)} dimensions)")
+                    self.embedding_model = model
+                    self.embedding_dims = len(test_result)
+                    logger.info(f"Google Embeddings {model} initialized ({len(test_result)} dimensions)")
                     return
             except Exception as e:
                 logger.warning(f"Google Embeddings failed: {e}")
@@ -108,27 +95,24 @@ class PDFVectorService:
             if not GOOGLE_API_KEY:
                 logger.info("No GOOGLE_API_KEY found, using local embeddings")
         
+        if provider == "google" and not allow_fallback:
+            raise RuntimeError(f"Index was built with Google embeddings ({model}) but they are unavailable")
         # Fallback to local
         self._init_local_embeddings()
-    
+
     def _init_local_embeddings(self):
         """Initialize local sentence-transformers embeddings"""
         try:
             from sentence_transformers import SentenceTransformer
             self.local_model = SentenceTransformer('all-MiniLM-L6-v2')
             self.embedding_type = "local"
+            self.embedding_model = "all-MiniLM-L6-v2"
+            self.embedding_dims = self.local_model.get_sentence_embedding_dimension()
             logger.info("Local Sentence Transformers initialized (all-MiniLM-L6-v2)")
         except Exception as e:
             logger.error(f"Failed to initialize local embeddings: {e}")
             raise
-    
-    def _get_or_create_collection(self, name: str):
-        """Get or create a ChromaDB collection"""
-        return self.chroma_client.get_or_create_collection(
-            name=name,
-            metadata={"description": "WPI Academic PDF Documents"}
-        )
-    
+
     def _embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for a list of texts"""
         try:
@@ -140,7 +124,7 @@ class PDFVectorService:
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             raise
-    
+
     def _embed_query(self, query: str) -> List[float]:
         """Generate embedding for a single query"""
         try:
@@ -151,47 +135,7 @@ class PDFVectorService:
         except Exception as e:
             logger.error(f"Error generating query embedding: {e}")
             raise
-    
-    def _get_pdf_hash(self) -> str:
-        """Get combined hash of all PDF files to detect changes"""
-        hash_parts = []
-        for pdf_name in PDF_FILES:
-            pdf_path = os.path.join(PDF_SOURCE_DIR, pdf_name)
-            if os.path.exists(pdf_path):
-                stat = os.stat(pdf_path)
-                hash_parts.append(f"{pdf_name}:{stat.st_size}:{stat.st_mtime}")
-        return md5("|".join(hash_parts).encode()).hexdigest()
-    
-    def _get_stored_hash(self) -> Optional[str]:
-        """Get previously stored hash from collection metadata"""
-        try:
-            metadata = self.collection.metadata or {}
-            return metadata.get("pdf_hash")
-        except:
-            return None
-    
-    def _update_stored_hash(self, new_hash: str):
-        """Update stored hash in collection metadata"""
-        try:
-            self.collection.modify(metadata={"pdf_hash": new_hash})
-        except Exception as e:
-            logger.warning(f"Could not update hash metadata: {e}")
-    
-    def _ensure_index(self):
-        """Build vector index if collection is empty or PDFs changed"""
-        current_hash = self._get_pdf_hash()
-        stored_hash = self._get_stored_hash()
-        
-        if self.collection.count() == 0:
-            logger.info("Empty collection, building PDF index...")
-            self._build_pdf_index()
-            self._update_stored_hash(current_hash)
-        elif current_hash != stored_hash:
-            logger.info("PDF files changed, rebuilding index...")
-            self.rebuild_index()
-        else:
-            logger.info(f"PDF index up to date with {self.collection.count()} chunks")
-    
+
     def _extract_text_from_pdf(self, pdf_path: str) -> str:
         """Extract text from a PDF file using PyMuPDF"""
         try:
@@ -215,7 +159,7 @@ class PDFVectorService:
         except Exception as e:
             logger.error(f"Error extracting text from {pdf_path}: {e}")
             return ""
-    
+
     def _chunk_text(self, text: str, source_file: str, chunk_size: int = 1500, overlap: int = 200) -> List[Dict[str, Any]]:
         """
         Split text into semantic chunks optimized for course catalogs.
@@ -307,7 +251,7 @@ class PDFVectorService:
         
         logger.info(f"Created {len(chunks)} chunks from {source_file}")
         return chunks
-    
+
     def _chunk_non_course_content(self, text: str, source_file: str, start_id: int, 
                                    chunk_size: int, overlap: int) -> List[Dict[str, Any]]:
         """Chunk non-course content (like program descriptions) using paragraphs."""
@@ -350,7 +294,7 @@ class PDFVectorService:
             })
         
         return chunks
-    
+
     def _create_overlapping_chunks(self, text: str, source_file: str, start_id: int,
                                     chunk_size: int, overlap: int, 
                                     extra_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -390,89 +334,81 @@ class PDFVectorService:
                 break
         
         return chunks
+
+
+class PDFVectorService(_PdfPipeline):
+    """
+    Read-only vector search over the active index version.
+
+    Extracts nothing and writes nothing: it opens whatever version CURRENT points to (or the
+    legacy index), and re-opens when CURRENT changes.
+    """
     
-    def _build_pdf_index(self):
-        """Build vector index from all PDF files"""
-        logger.info("Building PDF vector index...")
-        
-        all_chunks = []
-        
-        for pdf_name in PDF_FILES:
-            pdf_path = os.path.join(PDF_SOURCE_DIR, pdf_name)
-            
-            if not os.path.exists(pdf_path):
-                logger.warning(f"PDF not found: {pdf_path}")
-                continue
-            
-            # Extract text from PDF
-            text = self._extract_text_from_pdf(pdf_path)
-            
-            if not text:
-                logger.warning(f"No text extracted from {pdf_name}")
-                continue
-            
-            # Chunk the text
-            chunks = self._chunk_text(text, pdf_name)
-            all_chunks.extend(chunks)
-            logger.info(f"Created {len(chunks)} chunks from {pdf_name}")
-        
-        if not all_chunks:
-            logger.warning("No chunks created from PDFs")
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if PDFVectorService._initialized:
             return
-        
-        # Prepare data for ChromaDB
-        ids = [chunk["id"] for chunk in all_chunks]
-        documents = [chunk["text"] for chunk in all_chunks]
-        metadatas = []
-        for chunk in all_chunks:
-            meta: Dict[str, Any] = {
-                "source": chunk["source"],
-                "chunk_index": chunk["chunk_index"],
-            }
-            # Add optional course metadata if present
-            if "course_code" in chunk:
-                meta["course_code"] = chunk["course_code"]
-            if "course_title" in chunk:
-                meta["course_title"] = chunk["course_title"]
-            if "chunk_type" in chunk:
-                meta["chunk_type"] = chunk["chunk_type"]
-            metadatas.append(meta)
-        
-        # Generate embeddings in batches to avoid memory issues
-        batch_size = 50
-        all_embeddings = []
-        
-        for i in range(0, len(documents), batch_size):
-            batch = documents[i:i + batch_size]
-            batch_embeddings = self._embed_texts(batch)
-            all_embeddings.extend(batch_embeddings)
-            logger.info(f"Embedded batch {i // batch_size + 1}/{(len(documents) + batch_size - 1) // batch_size}")
-        
-        # Add to collection
-        self.collection.add(
-            ids=ids,
-            embeddings=all_embeddings,
-            documents=documents,
-            metadatas=metadatas
-        )
-        
-        # Update hash
-        self._update_stored_hash(self._get_pdf_hash())
-        
-        logger.info(f"Indexed {len(all_chunks)} chunks from {len(PDF_FILES)} PDFs")
-    
-    def rebuild_index(self):
-        """Force rebuild of the PDF vector index"""
-        logger.info("Rebuilding PDF index...")
-        
-        try:
-            self.chroma_client.delete_collection("pdf_documents")
-        except:
-            pass
-        
-        self.collection = self._get_or_create_collection("pdf_documents")
-        self._build_pdf_index()
-    
+        self._lock = threading.Lock()
+        self._last_check = 0.0
+        self.version: Optional[str] = None
+        self.index_path: Optional[str] = None
+        self.manifest: Dict[str, Any] = {}
+        self.collection = None
+        self.embedding_type = "none"
+        self._maybe_reload(force=True)
+        PDFVectorService._initialized = True
+        logger.info("PDFVectorService initialized (version=%s)", self.version)
+
+    def _maybe_reload(self, force: bool = False) -> None:
+        """Switch to the active index version if CURRENT changed (checked at most every few seconds)."""
+        now = time.monotonic()
+        if not force and now - self._last_check < RELOAD_CHECK_SECONDS:
+            return
+        with self._lock:
+            if not force and now - self._last_check < RELOAD_CHECK_SECONDS:
+                return
+            self._last_check = now
+            from .vector_index import active_index
+            version, path, manifest = active_index()
+            if version == self.version and self.collection is not None:
+                return
+            if path is None:
+                logger.error("No vector index found; build one with: python -m app.services.vector_index build")
+                return
+            try:
+                self._open(version, path, manifest)
+            except Exception:
+                # Keep serving the version we already have rather than going dark
+                logger.exception("Could not open vector index %s; staying on %s", version, self.version)
+
+    def _open(self, version: str, path: str, manifest: Dict[str, Any]) -> None:
+        provider, model = manifest.get("embedding_type"), manifest.get("embedding_model")
+        if (provider, model) != (getattr(self, "embedding_type", None), getattr(self, "embedding_model", None)):
+            if provider:
+                self._init_embeddings(provider, allow_fallback=False, model=model)
+            else:
+                self._init_embeddings()  # legacy index without a manifest: previous behaviour
+        client = chromadb.PersistentClient(path=path)
+        collection = client.get_collection(COLLECTION_NAME)
+        # Refuse an index whose vectors don't match the query model (the legacy index silently
+        # broke this way when its embedding model was retired)
+        sample = collection.peek(1).get("embeddings")
+        if sample is not None and len(sample) and len(sample[0]) != self.embedding_dims:
+            raise RuntimeError(f"Index {version} has {len(sample[0])}-dim vectors but the query model "
+                               f"{self.embedding_model} produces {self.embedding_dims}; rebuild the index")
+        # Assign together so a concurrent search never sees a half-switched state
+        self.chroma_client, self.collection = client, collection
+        self.version, self.index_path, self.manifest = version, path, manifest
+        logger.info("Serving vector index %s (%d chunks, %s embeddings)", version, collection.count(),
+                    self.embedding_type)
+
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
         Search PDF content using semantic similarity with course-aware ranking.
@@ -489,8 +425,9 @@ class PDFVectorService:
         Returns:
             List of matching chunks with scores
         """
-        if self.collection.count() == 0:
-            logger.warning("PDF index is empty")
+        self._maybe_reload()
+        if self.collection is None or self.collection.count() == 0:
+            logger.warning("PDF index is empty or not built")
             return []
         
         # Extract course code pattern from query
@@ -562,7 +499,7 @@ class PDFVectorService:
         formatted_results.sort(key=lambda x: x['score'], reverse=True)
         
         return formatted_results[:top_k]
-    
+
     def get_context_for_query(self, query: str, max_context_length: int = 4000) -> str:
         """
         Get relevant context from PDFs for a query.
@@ -604,16 +541,21 @@ class PDFVectorService:
             total_length += len(formatted)
         
         return "\n---\n".join(context_parts)
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the PDF index"""
+        self._maybe_reload()
         return {
-            "total_chunks": self.collection.count(),
+            "total_chunks": self.collection.count() if self.collection is not None else 0,
             "pdf_files": PDF_FILES,
             "embedding_type": self.embedding_type,
+            "embedding_model": getattr(self, "embedding_model", None),
             "pdf_source_dir": PDF_SOURCE_DIR,
-            "vector_db_path": CHROMA_PATH,
+            "vector_db_path": self.index_path,
+            "index_version": self.version,
+            "index_built_at": self.manifest.get("built_at"),
         }
+
 
 
 # Singleton instance

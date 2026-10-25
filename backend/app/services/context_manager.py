@@ -67,7 +67,7 @@ class StudentContext:
 
     def has_transcript(self) -> bool:
         """Check if transcript data has been uploaded."""
-        return bool(self.courses) or bool(self.transcript_text)
+        return bool(self.courses) or bool(self.current_courses) or bool(self.transcript_text)
 
 
 def _fernet() -> Fernet:

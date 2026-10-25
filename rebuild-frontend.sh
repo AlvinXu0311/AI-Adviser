@@ -15,7 +15,7 @@ sudo docker-compose up -d
 echo ""
 echo "Services rebuilt and restarted successfully!"
 echo ""
-echo "Frontend: http://localhost:8080"
+echo "Frontend: https://localhost:8443 (HTTP 8080 redirects)"
 echo "Backend API: http://localhost:8000/api/status"
 echo ""
 echo "Checking container status..."

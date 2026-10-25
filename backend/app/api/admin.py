@@ -14,45 +14,48 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 @router.post("/rebuild-pdf-index")
-async def rebuild_pdf_index():
+async def rebuild_pdf_index(activate: bool = True):
     """
-    Rebuild the PDF vector index from source PDF files.
-    
-    This will:
-    1. Delete the existing ChromaDB collection
-    2. Re-extract text from all PDF files
-    3. Re-chunk and embed all content
-    4. Store in a fresh ChromaDB collection
-    
-    Useful when PDF files are updated.
+    Build a new PDF vector index version offline and switch to it.
+
+    The active index keeps serving the whole time: the new version is written to its own
+    directory, validated, and only then activated (all workers move over within seconds).
+    Pass activate=false to build and validate without switching.
     """
+    from ..services import vector_index
+
+    logger.info("Admin: building a new PDF vector index version...")
     try:
-        from ..services.pdf_vector_service import get_pdf_vector_service
-        
-        logger.info("Admin: Rebuilding PDF vector index...")
-        service = get_pdf_vector_service()
-        
-        # Get stats before
-        before_stats = service.get_stats()
-        
-        # Rebuild
-        await asyncio.to_thread(service.rebuild_index)
-        
-        # Get stats after
-        after_stats = service.get_stats()
-        
-        return {
-            "status": "success",
-            "message": "PDF vector index rebuilt successfully",
-            "before": {"total_chunks": before_stats["total_chunks"]},
-            "after": {"total_chunks": after_stats["total_chunks"]},
-            "pdf_files": after_stats["pdf_files"],
-            "embedding_type": after_stats["embedding_type"],
-        }
-        
+        manifest = await asyncio.to_thread(vector_index.build, activate)
+    except vector_index.BuildInProgress:
+        raise HTTPException(status_code=409, detail="An index build is already running")
+    except vector_index.IndexBuildError as e:
+        # Validation failures are meant for the admin: the catalog or embeddings need attention
+        logger.error(f"New PDF index failed validation: {e}")
+        raise HTTPException(status_code=422, detail=f"New index rejected, active index unchanged: {e}")
     except Exception as e:
-        logger.error(f"Error rebuilding PDF index: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to rebuild index")
+        logger.error(f"Error building PDF index: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to build index; active index unchanged")
+
+    return {"status": "success", "activated": activate, **manifest}
+
+
+@router.get("/pdf-index-versions")
+async def list_pdf_index_versions():
+    """All built index versions, newest last, with which one is active."""
+    from ..services import vector_index
+    return {"versions": await asyncio.to_thread(vector_index.list_versions)}
+
+
+@router.post("/pdf-index-versions/{version}/activate")
+async def activate_pdf_index_version(version: str):
+    """Serve an existing version, e.g. to roll back a bad catalog update."""
+    from ..services import vector_index
+    try:
+        await asyncio.to_thread(vector_index.activate, version)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="No complete index version with that name")
+    return {"status": "success", "active": version}
 
 
 @router.get("/pdf-index-stats")

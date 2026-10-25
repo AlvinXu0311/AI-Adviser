@@ -17,6 +17,7 @@ from ..services.pdf_extraction_service import PDFExtractionService
 from ..services.context_manager import get_context_manager
 from ..services.rate_limit import rate_limited
 from ..services.session_access import claim_session
+from ..services.untrusted import sanitize_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,9 @@ async def extract_transcript(
         # Store in context manager for subsequent chat requests (session-based)
         context_manager = get_context_manager()
         
-        # Convert Pydantic model to dict for storage
-        transcript_dict = {
+        # Convert Pydantic model to dict for storage. The PDF is user-supplied, so only validated
+        # fields are kept (prompt-injection defense, see services/untrusted.py)
+        transcript_dict = sanitize_transcript({
             "student_name": transcript_data.student_name,
             "student_id": transcript_data.student_id,
             "gpa": transcript_data.gpa,
@@ -105,8 +107,7 @@ async def extract_transcript(
                 }
                 for c in (transcript_data.current_courses or [])
             ],
-            "transcript_text": transcript_data.raw_text
-        }
+        })
         await asyncio.to_thread(context_manager.set_student_context, request.session_id, transcript_dict)
 
         return ExtractTranscriptResponse(
